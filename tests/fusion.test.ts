@@ -58,7 +58,8 @@ describe('fuse', () => {
   });
 
   it('drops candidates below minScore', () => {
-    const out = fuse([{ rowid: 1, distance: 0 }], [{ rowid: 2, bm25: 0 }], 0.5, 0.4);
+    // rowid 1: merged 0.5 (semantic only) | rowid 2: merged 0.25 (fts with bm25=-1)
+    const out = fuse([{ rowid: 1, distance: 0 }], [{ rowid: 2, bm25: -1 }], 0.5, 0.4);
     expect(out).toEqual([{ rowid: 1, score: 0.5, matchedBy: 'semantic' }]); // rowid 2 (0.25) dropped
 
     const allDropped = fuse([{ rowid: 1, distance: 0 }], [], 0.5, 0.6);
