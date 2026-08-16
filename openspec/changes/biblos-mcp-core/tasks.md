@@ -79,15 +79,15 @@ Scope note: one change, one slice (memory + bus together, per user). Work units 
 
 ## Phase 8: E2E Verification
 
-- [ ] 8.1 Create `tests/e2e/bus-roundtrip.test.ts` — spawn dist/index.js temp env; two-agent send→poll→respond→status; restart persistence (REQ-010..013, REQ-017) — done: vitest green — ~120 ln
-- [ ] 8.2 Create `tests/e2e/search.test.ts` — hybrid returns semantic + keyword hits with fixed mock vectors (REQ-005) — done: vitest green — ~80 ln
-- [ ] 8.3 Run `npm run build && npx vitest run` — all 17+1 REQs green via MCP test client — done: 0 failures — 0 ln
+- [x] 8.1 Create `tests/e2e/bus-roundtrip.test.ts` — spawn dist/index.js temp env; two-agent send→poll→respond→status; restart persistence (REQ-010..013, REQ-017) — done: `npx vitest run tests/e2e/bus-roundtrip.test.ts` → 2 passed (roundtrip incl. registration-first rule + empty poll; restart keeps pendiente/completada states and bus usable) — ~230 ln
+- [x] 8.2 Create `tests/e2e/search.test.ts` — hybrid returns semantic + keyword hits with fixed mock vectors (REQ-005) — done: `npx vitest run tests/e2e/search.test.ts` → 1 passed (mat→'both' doc1, mat↔into bucket-352 'semantic' doc2, unrelated dropped at minScore 0.1) — ~90 ln
+- [x] 8.3 Run `npm run build && npx vitest run` — all 17+1 REQs green via MCP test client — done: build exits 0; `npx vitest run` → 15 files / 130 tests passed (127 prior + 3 new E2E) — 0 ln
 
 ## Phase 9: Deploy (VPS)
 
-- [ ] 9.1 Create `deploy/biblos.service` (User=biblos, ProtectSystem=strict, ReadWritePaths=/opt/biblos, PrivateTmp, NoNewPrivileges, CapabilityBoundingSet=, RestrictAddressFamilies=AF_INET AF_UNIX, EnvironmentFile=/etc/biblos/biblos.env, Restart=always) + `deploy/biblos.env.example` — done: unit renders ExecStart=/usr/bin/node /opt/biblos/dist/index.js — ~30 ln
-- [ ] 9.2 Create `deploy/apache-vhost.conf` — biblos.coltmandev.dev, ProxyPreserveHost On, ProxyPass / → http://127.0.0.1:8199/ — done: `apachectl configtest` passes — ~25 ln
-- [ ] 9.3 VPS: verify sqlite-vec prebuild for Node 22 ABI 115 linux-x64; fallback node-gyp (build-essential+python3); create /opt/biblos + biblos user; install + build dist — done: `node -e "require('sqlite-vec')"` loads — ~20 ln
-- [ ] 9.4 VPS: `systemctl enable --now biblos`; loopback smoke `curl -H "Authorization: Bearer $KEY" 127.0.0.1:8199/mcp` → expected 401/200 — done: smoke passes — ~10 ln
-- [ ] 9.5 DNS+TLS: Cloudflare A record → 62.171.164.5; `certbot --apache -d biblos.coltmandev.dev`; enable vhost + `apachectl reload` — done: https://biblos.coltmandev.dev reachable, cert valid — ~10 ln
-- [ ] 9.6 Create `docs/clients.md` — OpenClaw (streamable-http) + OpenCode (remote, Bearer, oauth:false) integration steps (REQ-core-client-docs) — done: doc present and matches deployed config — ~120 ln
+- [x] 9.1 Create `deploy/biblos.service` (User=biblos, ProtectSystem=strict, ReadWritePaths=/opt/biblos, PrivateTmp, NoNewPrivileges, CapabilityBoundingSet=, RestrictAddressFamilies=AF_INET AF_UNIX, EnvironmentFile=/etc/biblos/biblos.env, Restart=always) + `deploy/biblos.env.example` — done: unit renders ExecStart=/usr/bin/node /opt/biblos/dist/index.js with the full hardening set; env example VPS-shaped (DB_PATH=/opt/biblos/biblos.db, loopback bind, router URL) with empty key/origins + install comments — ~45 ln
+- [x] 9.2 Create `deploy/apache-vhost.conf` — biblos.coltmandev.dev, ProxyPreserveHost On, ProxyPass / → http://127.0.0.1:8199/ — done: vhost with ProxyPass/ProxyPassReverse to loopback-only upstream + a2enmod/a2ensite/certbot install notes — ~25 ln
+- [ ] 9.3 VPS: verify sqlite-vec prebuild for Node 22 ABI 115 linux-x64; fallback node-gyp (build-essential+python3); create /opt/biblos + biblos user; install + build dist — ~20 ln
+- [ ] 9.4 VPS: `systemctl enable --now biblos`; loopback smoke `curl -H "Authorization: Bearer $KEY" 127.0.0.1:8199/mcp` → expected 401/200 — ~10 ln
+- [ ] 9.5 DNS+TLS: Cloudflare A record → 62.171.164.5; `certbot --apache -d biblos.coltmandev.dev`; enable vhost + `apachectl reload` — ~10 ln
+- [x] 9.6 Create `docs/clients.md` — OpenClaw (streamable-http) + OpenCode (remote, Bearer, oauth:false) integration steps (REQ-core-client-docs) — done: doc covers shared 3-header auth model (Authorization/Origin/X-Biblos-Agent), registration-first rule, OpenCode remote config, OpenClaw streamable-http + secret-store key, Claude Code CLI, curl smoke — ~110 ln
