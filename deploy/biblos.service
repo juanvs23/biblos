@@ -1,0 +1,41 @@
+# Biblos MCP server — systemd unit (task 9.1, design "Deploy" section).
+#
+# Install:
+#   sudo cp deploy/biblos.service /etc/systemd/system/biblos.service
+#   sudo useradd --system --home /opt/biblos --shell /usr/sbin/nologin biblos   (first time only)
+#   sudo install -d -o biblos -g biblos /opt/biblos
+#   sudo install -m 600 -o biblos -g biblos deploy/biblos.env.example /etc/biblos/biblos.env
+#   # then fill in BIBLOS_API_KEY / BIBLOS_ALLOWED_ORIGINS in /etc/biblos/biblos.env
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now biblos
+#
+# Service runs as a locked-down unprivileged user: the process can only write
+# inside /opt/biblos (SQLite DB, WAL files), cannot spawn new processes
+# (NoNewPrivileges + empty CapabilityBoundingSet), keeps a private /tmp, and can
+# only reach the network via AF_INET/AF_UNIX sockets (the llama router on
+# 127.0.0.1:8085 and the loopback bind on 127.0.0.1:8199).
+
+[Unit]
+Description=Biblos MCP server (documented memory + agent bus)
+After=network.target
+
+[Service]
+Type=simple
+User=biblos
+Group=biblos
+WorkingDirectory=/opt/biblos
+EnvironmentFile=/etc/biblos/biblos.env
+ExecStart=/usr/bin/node /opt/biblos/dist/index.js
+Restart=always
+RestartSec=3
+
+# --- hardening (design "Security" section) ---
+ProtectSystem=strict
+ReadWritePaths=/opt/biblos
+PrivateTmp=true
+NoNewPrivileges=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
