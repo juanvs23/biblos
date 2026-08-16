@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+
+# SQLite files
+*.db
+*.db-wal
+*.db-shm
+
+# Local env
+.env
+.env.local
+
+# OS/editor
+.DS_Store
+*.log
