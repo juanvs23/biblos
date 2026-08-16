@@ -192,4 +192,36 @@ describe('Store', () => {
     store.registerAgent(makeAgent('alice'));
     expect(store.assertAgent('alice')).toBe(true);
   });
+
+  it('reads agents back with parsed capabilities and persisted created_at', () => {
+    const agent = makeAgent('alice');
+    store.registerAgent(agent);
+
+    const loaded = store.getAgent('alice');
+    expect(loaded).toEqual(agent);
+    expect(loaded?.createdAt).toBe(agent.createdAt); // domain-provided timestamp persisted, not DB default
+    expect(store.getAgent('nobody')).toBeNull();
+  });
+
+  it('lists all agents sorted by name', () => {
+    store.registerAgent(makeAgent('bob'));
+    store.registerAgent(makeAgent('alice'));
+
+    expect(store.listAgents().map((a) => a.name)).toEqual(['alice', 'bob']);
+  });
+
+  it('lists all relations in insertion order for full-graph render', () => {
+    const a = makeDoc({ content: 'a' });
+    const b = makeDoc({ content: 'b' });
+    const c = makeDoc({ content: 'c' });
+    [a, b, c].forEach((d) => store.insertDocument(d, vec(0.1)));
+
+    store.addRelation({ sourceId: a.id, type: 'related', targetId: b.id });
+    store.addRelation({ sourceId: b.id, type: 'related', targetId: c.id });
+
+    expect(store.listRelations()).toEqual([
+      { sourceId: a.id, type: 'related', targetId: b.id },
+      { sourceId: b.id, type: 'related', targetId: c.id },
+    ]);
+  });
 });
