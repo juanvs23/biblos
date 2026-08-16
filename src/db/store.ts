@@ -60,6 +60,13 @@ interface RequestRow {
   created_at: string;
 }
 
+interface AgentRow {
+  name: string;
+  type: string;
+  capabilities: string;
+  created_at: string;
+}
+
 const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 /**
@@ -85,6 +92,15 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     tags: JSON.parse(row.tags) as string[],
     project: row.project ?? undefined,
     type: row.type,
+  };
+}
+
+function mapAgent(row: AgentRow): AgentRecord {
+  return {
+    name: row.name,
+    type: row.type,
+    capabilities: JSON.parse(row.capabilities) as string[],
+    createdAt: row.created_at,
   };
 }
 
@@ -244,6 +260,13 @@ export class Store {
     this.db.prepare('DELETE FROM relations WHERE source_id = ? AND type = ? AND target_id = ?').run(r.sourceId, r.type, r.targetId);
   }
 
+  /** All relations in insertion order — used by full-graph render. */
+  listRelations(): Relation[] {
+    return this.db
+      .prepare('SELECT source_id AS sourceId, type, target_id AS targetId FROM relations ORDER BY id')
+      .all() as Relation[];
+  }
+
   /** Breadth-first traversal over outgoing relations, optionally filtered by type. */
   queryGraph(start: string, type: string | undefined, depth: number): GraphQuery {
     const nodes = new Set<string>([start]);
@@ -254,9 +277,13 @@ export class Store {
       for (const node of frontier) {
         const rows =
           type === undefined
-            ? (this.db.prepare('SELECT source_id, type, target_id FROM relations WHERE source_id = ?').all(node) as Relation[])
+            ? (this.db
+                .prepare('SELECT source_id AS sourceId, type, target_id AS targetId FROM relations WHERE source_id = ?')
+                .all(node) as Relation[])
             : (this.db
-                .prepare('SELECT source_id, type, target_id FROM relations WHERE source_id = ? AND type = ?')
+                .prepare(
+                  'SELECT source_id AS sourceId, type, target_id AS targetId FROM relations WHERE source_id = ? AND type = ?',
+                )
                 .all(node, type) as Relation[]);
         for (const edge of rows) {
           edges.push(edge);
@@ -275,12 +302,21 @@ export class Store {
 
   registerAgent(a: AgentRecord): void {
     this.db
-      .prepare('INSERT INTO agents (name, type, capabilities) VALUES (?, ?, ?)')
-      .run(a.name, a.type, JSON.stringify(a.capabilities));
+      .prepare('INSERT INTO agents (name, type, capabilities, created_at) VALUES (?, ?, ?, ?)')
+      .run(a.name, a.type, JSON.stringify(a.capabilities), a.createdAt);
   }
 
   assertAgent(name: string): boolean {
     return this.db.prepare('SELECT 1 FROM agents WHERE name = ?').get(name) !== undefined;
+  }
+
+  getAgent(name: string): AgentRecord | null {
+    const row = this.db.prepare('SELECT * FROM agents WHERE name = ?').get(name) as AgentRow | undefined;
+    return row ? mapAgent(row) : null;
+  }
+
+  listAgents(): AgentRecord[] {
+    return (this.db.prepare('SELECT * FROM agents ORDER BY name').all() as AgentRow[]).map(mapAgent);
   }
 
   // --- bus ---

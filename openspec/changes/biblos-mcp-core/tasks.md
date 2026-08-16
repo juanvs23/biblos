@@ -59,15 +59,15 @@ Scope note: one change, one slice (memory + bus together, per user). Work units 
 
 ## Phase 5: Knowledge Graph Domain (REQ-007..009)
 
-- [ ] 5.1 Create `src/domain/graph.ts` — add/remove relation (reject unknown node), BFS query by type/depth, Mermaid default + Graphviz render — done: graph tests — ~110 ln
-- [ ] 5.2 Create `tests/graph.test.ts` — add; unknown node rejected; depth-2 traverse; unknown start → not-found; mermaid/graphviz/empty output (REQ-007..009) — done: vitest green — ~90 ln
+- [x] 5.1 Create `src/domain/graph.ts` — add/remove relation (reject unknown node), BFS query by type/depth, Mermaid default + Graphviz render — done: graph tests — ~110 ln
+- [x] 5.2 Create `tests/graph.test.ts` — add; unknown node rejected; depth-2 traverse; unknown start → not-found; mermaid/graphviz/empty output (REQ-007..009) — done: vitest green — ~90 ln
 
 ## Phase 6: Agent Registry + Bus (REQ-010..014)
 
-- [ ] 6.1 Create `src/domain/registry.ts` — register (unique name, created_at, required fields), assertAgent → identity error — done: registry tests — ~40 ln
-- [ ] 6.2 Create `src/domain/bus.ts` — send (reject unregistered recipient, state pendiente), poll (oldest pendiente → en-proceso, filtered by recipient identity), respond (verify recipient + state), status (REQ-010..013) — done: bus tests — ~120 ln
-- [ ] 6.3 Create `tests/registry.test.ts` — unique/duplicate/missing fields; unregistered bus use → identity error (REQ-014) — done: vitest green — ~50 ln
-- [ ] 6.4 Create `tests/bus.test.ts` — state machine, foreign poll → empty + state untouched, non-recipient respond fails, wrong-state fails, unknown id → not-found (REQ-010..013) — done: vitest green — ~110 ln
+- [x] 6.1 Create `src/domain/registry.ts` — register (unique name, created_at, required fields), assertAgent → identity error — done: registry tests — ~40 ln
+- [x] 6.2 Create `src/domain/bus.ts` — send (reject unregistered recipient, state pendiente), poll (oldest pendiente → en-proceso, filtered by recipient identity), respond (verify recipient + state), status (REQ-010..013) — done: bus tests — ~120 ln
+- [x] 6.3 Create `tests/registry.test.ts` — unique/duplicate/missing fields; unregistered bus use → identity error (REQ-014) — done: vitest green — ~50 ln
+- [x] 6.4 Create `tests/bus.test.ts` — state machine, foreign poll → empty + state untouched, non-recipient respond fails, wrong-state fails, unknown id → not-found (REQ-010..013) — done: vitest green — ~110 ln
 
 ## Phase 7: Security + MCP Server (REQ-015)
 
