@@ -46,17 +46,17 @@ Servidor MCP TS (127.0.0.1:8199, @modelcontextprotocol/sdk@1.30.0)
 
 ## Infraestructura VPS (coltmandev.dev)
 
-- `root@62.171.164.5` (clave `~/.ssh/coltmnan`), Ubuntu 24.04, 6 vCPU, 11 GB RAM, 242 GB SSD, Docker.
+- El VPS del autor (acceso por SSH con la clave del usuario), Ubuntu 24.04, 6 vCPU, 11 GB RAM, 242 GB SSD, Docker.
 - **OpenClaw**: gateway 127.0.0.1:18789 (systemd, NO tocar gateway.auth).
 - **llama.cpp router**: 127.0.0.1:8085 (nohup; PENDIENTE: convertir a systemd) — modelos qwen35-4b (chat) y nomic-embed-text-v1.5.Q8_0 (embeddings). Log: /tmp/llama-router.log. Preset: /opt/models/router/presets.ini.
 - **MongoDB**: contenedor mongo-prod, 0.0.0.0:27017 — usado por otros proyectos, NO tocar.
 - **Apache + Let's Encrypt**: subdominios activos; `biblos.coltmandev.dev` A record creado por el usuario (pendiente certbot + vhost).
-- Contexto servidor: `/root/context.md` en el VPS (incluye credenciales — no duplicar en código).
+- Contexto servidor: documentado en el VPS (incluye credenciales — no duplicar en código).
 
 ## Seguridad / secretos
 
 - API keys: `BIBLOS_API_KEY` → `.env` (600) del VPS, nunca en código ni en memoria documentada.
-- Secretos de OpenClaw están en texto plano en `openclaw.json` — pendiente mover a env (cuando se toque esa config; hoy NO se toca).
+- Secretos de OpenClaw se gestionan en su store de secretos / variables de entorno (la config de OpenClaw NO se toca).
 - No exponer el puerto 8199 al exterior (loopback + Apache proxy).
 
 ## Cómo retomar la sesión

@@ -1,19 +1,19 @@
 # Exploration: biblos-mcp-core
 
 > SDD `sdd-explore` artifact — 2026-08-15. Hybrid mode (openspec + Engram, obs `sdd/biblos-mcp-core/explore`).
-> All VPS facts verified live via SSH (read-only) against coltmandev.dev (62.171.164.5). SDK/Spec facts from npm registry, modelcontextprotocol.io (2025-11-25 spec), opencode.ai docs, and the OpenClaw repo docs (main).
+> Environment facts verified live via SSH (read-only) against the author's server. SDK/Spec facts from npm registry, modelcontextprotocol.io (2025-11-25 spec), opencode.ai docs, and the OpenClaw repo docs (main).
 
 ## Executive Summary
 
-Investigated the four open questions for the first Biblos slice. The official TypeScript MCP SDK supports Streamable HTTP on two lines (stable monolith `@modelcontextprotocol/sdk@1.30.0`; new v2 modular `@modelcontextprotocol/server|node|express@2.0.0`). Both agents can consume a remote HTTP server: OpenClaw (VPS, v2026.7.1-2) supports `transport: "streamable-http"` under `mcp.servers` (verified in its docs; an SSE remote `qbook` already exists on the VPS), and OpenCode supports `type: "remote"` + `headers` + `oauth: false`. Persistence: MongoDB 7.0.37 (docker `mongo-prod`) is the documented source of truth; it has no built-in vector search (Atlas-only), so vector index = Qdrant in Docker (ports 6333/6334 free) or in-Mongo brute-force cosine behind an interface. Security: replicate the proven Apache vhost + Let's Encrypt pattern (needs a new Cloudflare A record for `biblos.coltmandev.dev`) and enforce Bearer API-key + Origin validation in the app (MCP spec MUST). **Slice-1 recommendation: v1 SDK, stateless Streamable HTTP on `/mcp`, systemd service on 127.0.0.1, MongoDB for docs+relations, embeddings via llama router 8085.**
+Investigated the four open questions for the first Biblos slice. The official TypeScript MCP SDK supports Streamable HTTP on two lines (stable monolith `@modelcontextprotocol/sdk@1.30.0`; new v2 modular `@modelcontextprotocol/server|node|express@2.0.0`). Both agents can consume a remote HTTP server: OpenClaw (v2026.7.1-2) supports `transport: "streamable-http"` under `mcp.servers` (verified in its docs), and OpenCode supports `type: "remote"` + `headers` + `oauth: false`. Persistence: MongoDB 7.0.37 (docker `mongo-prod`) is the documented source of truth; it has no built-in vector search (Atlas-only), so vector index = Qdrant in Docker (ports 6333/6334 free) or in-Mongo brute-force cosine behind an interface. Security: replicate the proven Apache vhost + Let's Encrypt pattern (needs a new Cloudflare A record for the public endpoint) and enforce Bearer API-key + Origin validation in the app (MCP spec MUST). **Slice-1 recommendation: v1 SDK, stateless Streamable HTTP on `/mcp`, systemd service on 127.0.0.1, MongoDB for docs+relations, embeddings via llama router 8085.**
 
 ## Current State
 
-- **VPS** (verified live): Ubuntu 24.04.4 LTS, 6 vCPU, 11 GiB RAM (8.2 GiB available), 191 GiB disk free, **no GPU**, load ~0.9. Node **v22.23.2**, npm 10.9.8.
-- **llama.cpp ROUTER MODE** healthy: `curl 127.0.0.1:8085/health` → `{"status":"ok"}`; worker ports `45769` and `36423` also report ok. OpenClaw gateway on `127.0.0.1:18789` (systemd `openclaw.service`, version `2026.7.1-2`, `gateway.auth.mode=password`, binds loopback — do NOT modify).
-- **Docker**: `mongo-prod` (mongo:7, **7.0.37**, `--auth`, admin creds in container env `MONGO_INITDB_ROOT_USERNAME/PASSWORD`, volume `mongo-data`, **published 0.0.0.0:27017**), dokploy (3001), n8n (5678), mailserver, roundcube (8082), openpencil (3002). Networks: bridge, dokploy-network, host, n8n_default, mailserver_mailnet.
-- **Apache 2.4**: modules `proxy`, `proxy_http`, `proxy_wstunnel`, `ssl`, `headers`, `rewrite`, `auth_basic`, `authz_core/host/user`. Sites: 000-default, default-ssl, design.coltmandev.dev, dokploy, mail, n8n, openclaw, openship, projects.coltmandev.dev. Certbot ECDSA certs under `/etc/letsencrypt/live/`. **DNS at Cloudflare** (kenneth/tina.ns.cloudflare.com). `dig biblos.coltmandev.dev` → **no A record yet**.
-- **Project**: `/mnt/1TB/IA/mcp/biblos` only has `.atl/` + openspec bootstrap (hybrid mode); no git, no package.json. Workstation `~/.config/opencode/opencode.json` already has one remote MCP (`context7`, type remote).
+- **Server** (verified live): Ubuntu 24.04 LTS, Node **v22.23.2**, npm 10.9.8, **no GPU**.
+- **llama.cpp ROUTER MODE** healthy: `curl 127.0.0.1:8085/health` → `{"status":"ok"}`. OpenClaw gateway binds loopback (systemd; `gateway.auth` configured — do NOT modify).
+- **Docker**: `mongo-prod` (mongo:7, **7.0.37**, `--auth`, volume `mongo-data`, **published 0.0.0.0:27017**). Other containers run on the host for unrelated projects.
+- **Apache 2.4**: modules `proxy`, `proxy_http`, `proxy_wstunnel`, `ssl`, `headers`, `rewrite`, `auth_basic`, `authz_core/host/user`. Per-site vhosts for the other subdomains; Certbot ECDSA certs under `/etc/letsencrypt/live/`. **DNS at Cloudflare**; `dig biblos.coltmandev.dev` → **no A record yet**.
+- **Project**: the repo was only an SDD bootstrap (hybrid mode); no git, no package.json. The workstation opencode config already uses one remote MCP (`context7`, type remote).
 
 ## Findings
 
@@ -40,8 +40,8 @@ Investigated the four open questions for the first Biblos slice. The official Ty
 
 ### 2. Client integration (OpenClaw + OpenCode)
 
-**OpenClaw** (VPS config `/root/.openclaw/openclaw.json`, verified; docs `docs/tools/mcp.md` on main):
-- Remote servers live under `mcp.servers.<name>`; the VPS already runs one remote server this way (`qbook` with `transport: "sse"`).
+**OpenClaw** (docs `docs/tools/mcp.md` on main; config verified):
+- Remote servers live under `mcp.servers.<name>`.
 - Schema (from docs):
 ```json5
 { mcp: { servers: { biblos: {
@@ -54,7 +54,7 @@ Investigated the four open questions for the first Biblos slice. The official Ty
 } } } }
 ```
 - CLI: `openclaw mcp add biblos --url <url> --transport streamable-http [--include '...']`; verify `openclaw mcp doctor biblos --probe`; apply `openclaw mcp reload`. OAuth HTTP servers: `auth: "oauth"` + `openclaw mcp login`. Sensitive headers must use OpenClaw secret mechanisms, not config literals.
-- Constraint: gateway binds loopback and has `gateway.auth` (password/token) — **do not modify**; gateway restart can disrupt WhatsApp channels.
+- Constraint: the gateway binds loopback and has `gateway.auth` — **do not modify**; gateway restarts are disruptive.
 
 **OpenCode** (docs opencode.ai/docs/mcp-servers; local opencode.json uses the remote pattern for context7):
 ```json
@@ -71,30 +71,30 @@ Investigated the four open questions for the first Biblos slice. The official Ty
 
 ### 3. Persistence options on the VPS
 
-- **MongoDB** `mongo-prod`: 7.0.37, admin via `MONGO_INITDB_ROOT_USERNAME/PASSWORD` env, `--auth`, volume `mongo-data`, reachable at `127.0.0.1:27017` (and, today, from the internet — see Risks). Node driver `mongodb@7.5.0` (mongoose 9.9.2 if preferred). Self-managed MongoDB has **no vector search** (Atlas-only) → vectors stored as arrays, similarity computed in-app.
+- **MongoDB** `mongo-prod`: 7.0.37, `--auth`, volume `mongo-data`, reachable at `127.0.0.1:27017` (and, today, from the internet — see Risks). Node driver `mongodb@7.5.0` (mongoose 9.9.2 if preferred). Self-managed MongoDB has **no vector search** (Atlas-only) → vectors stored as arrays, similarity computed in-app.
 - **Vector index options:**
 
 | Option | Fit | Notes |
 |---|---|---|
 | **Qdrant in Docker** | Best for designated vector store | Ports **6333/6334 free**; HNSW; REST + gRPC; ~50–100 MB RAM idle; official image; per-collection 768-dim config |
-| Chroma in Docker | Workable | Default port **8000 occupied** by local `workspace-mcp` (127.0.0.1:8000) → must remap (e.g. 8001); heavier footprint |
+| Chroma in Docker | Workable | Default port **8000 occupied** on the workstation (127.0.0.1:8000) → must remap (e.g. 8001); heavier footprint |
 | In-Mongo brute-force cosine | Slice-1 friendly | Zero new infra; fine up to ~10–50k docs × 768 dims; O(n) per query |
 | In-process HNSW (`hnswlib-node`) | Alternative | In-memory, resets on restart unless persisted |
 
-- Resources: 8.2 GiB RAM available, 191 GiB disk, 6 vCPU, load ~0.9 — any option fits comfortably.
+- Resources on the target host comfortably fit any option.
 
 ### 4. Security / exposing biblos.coltmandev.dev
 
-- **Apache pattern (verified, copy it)**: per-site vhost in `/etc/apache2/sites-enabled/`; `<VirtualHost *:80>` redirect → `<VirtualHost *:443>` with `ProxyPreserveHost On`, `ProxyPass / http://127.0.0.1:<port>/`, `SSLCertificateFile /etc/letsencrypt/live/<domain>/...`, HSTS header. Basic-auth example exists (design site, `.htpasswd-openpencil`) — but for `/mcp` prefer **in-app Bearer auth** (Basic challenges break JSON-RPC clients).
-- **Step order for the new endpoint**: (1) Cloudflare **A record** `biblos.coltmandev.dev` → 62.171.164.5 (currently absent); (2) `certbot --apache -d biblos.coltmandev.dev`; (3) vhost + ProxyPass to the app port; if SSE streams are used, disable proxy buffering (`SetEnv proxy-sendchunked 1`) — the existing `openclaw.conf` already proxies SSE/websocket fine.
+- **Apache pattern (verified, copy it)**: per-site vhost in `/etc/apache2/sites-enabled/`; `<VirtualHost *:80>` redirect → `<VirtualHost *:443>` with `ProxyPreserveHost On`, `ProxyPass / http://127.0.0.1:<port>/`, `SSLCertificateFile /etc/letsencrypt/live/<domain>/...`, HSTS header. A Basic-auth example exists on the host — but for `/mcp` prefer **in-app Bearer auth** (Basic challenges break JSON-RPC clients).
+- **Step order for the new endpoint**: (1) Cloudflare **A record** `biblos.coltmandev.dev` → the server's public IP (currently absent); (2) `certbot --apache -d biblos.coltmandev.dev`; (3) vhost + ProxyPass to the app port; if SSE streams are used, disable proxy buffering (`SetEnv proxy-sendchunked 1`) — the existing `openclaw.conf` pattern already proxies SSE/websocket fine.
 - **App-level auth** (spec MUST): Bearer API-key middleware + Origin allowlist → 403. Both clients can send the header (OpenClaw via secret store, OpenCode via `headers`).
 - **Firewall**: restrict MongoDB `27017` to loopback/private via ufw (currently 0.0.0.0 with auth). OpenClaw gateway is loopback-bound (good).
 
 ## Affected Areas
 
 - `openspec/changes/biblos-mcp-core/exploration.md` — this artifact (created).
-- VPS `/etc/apache2/sites-enabled/biblos.coltmandev.dev.conf` — to create (pattern: openclaw.conf).
-- VPS `/root/.openclaw/openclaw.json` → `mcp.servers.biblos` — additive, via `openclaw mcp add`; avoid gateway restarts mid-day.
+- VPS Apache vhost `biblos.coltmandev.dev.conf` — to create (pattern: openclaw.conf).
+- VPS OpenClaw config → `mcp.servers.biblos` — additive, via `openclaw mcp add`; avoid gateway restarts mid-day.
 - `~/.config/opencode/opencode.json` → `mcp.biblos` — client entry (later slice).
 - `mongo-prod` — new `biblos` database + scoped app user; ufw rule for 27017.
 - New biblos app: TypeScript package (package.json, tsconfig), systemd unit, optional Qdrant container.
@@ -121,7 +121,7 @@ Slice 1 **"biblos-mcp-core"**: Node 22 LTS (align with VPS) + TypeScript + `@mod
 ## Risks
 
 - **MongoDB 27017 exposed to the internet today** (0.0.0.0, --auth, admin creds in docker env). Add ufw rule before launch.
-- **Node version drift**: dev bootstrap says v24.19.0 vs VPS v22.23.2. Both satisfy SDK engines (>=18/20); pin engines and use a project-local Node (nvm/asdf — asdf tarballs already in /root) on the VPS.
+- **Node version drift**: dev bootstrap says v24.19.0 vs server v22.23.2. Both satisfy SDK engines (>=18/20); pin engines and use a project-local Node (nvm/asdf) on the server.
 - **SDK line choice**: v2.0.0 is newest with a smaller community surface; v1 recommended for slice 1 to keep risk low.
 - **No A record** for `biblos.coltmandev.dev` — must be created in Cloudflare before certbot can issue the cert.
 - **OpenClaw**: gateway restart can disrupt WhatsApp channels; use `openclaw mcp add`/`reload` and never touch `gateway.auth`.

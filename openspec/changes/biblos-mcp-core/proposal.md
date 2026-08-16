@@ -67,7 +67,7 @@ Stateless `McpServer` on `/mcp`; better-sqlite3 + sqlite-vec + FTS5 single file;
 | `/mnt/1TB/IA/mcp/biblos/` | New — package, src/, vitest |
 | `/opt/biblos/biblos.db` | New — SQLite file |
 | Apache vhost + systemd unit | New — proxy + service |
-| `/root/.openclaw/openclaw.json` | Modified — mcp.servers.biblos |
+| OpenClaw config (server) | Modified — `mcp.servers.biblos` |
 | `~/.config/opencode/opencode.json` | Modified — mcp.biblos (docs) |
 | Cloudflare DNS | Modified — A record |
 

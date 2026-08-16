@@ -1,7 +1,7 @@
 # Biblos MCP — Roadmap de lo faltante
 
 > Estado: 2026-08-15 (cierre de sesión)
-> Proyecto: /mnt/1TB/IA/mcp/biblos · VPS: coltmandev.dev (62.171.164.5)
+> Proyecto: /mnt/1TB/IA/mcp/biblos · VPS: coltmandev.dev (el IP público del servidor)
 
 ## Estado actual
 
