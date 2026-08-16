@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 
 import { openStore, type Store } from '../src/db/store.js';
 import { createToolsServer } from '../src/server/tools.js';
+import { authHeaders, postJsonRpc, startHttpServer, type RpcHeaders } from './http.js';
 import { bagOfWordsEmbedding, mockEmbeddings } from './helpers.js';
 
 export const TOOL_NAMES = [
@@ -386,3 +387,207 @@ describe('bus tools without identity header (REQ-bus-*)', () => {
 });
 
 export { bagOfWordsEmbedding };
+
+// --- HTTP integration: real server + StreamableHTTPServerTransport, no network ---
+
+/** tools/call over raw HTTP; returns the CallToolResult (isError + content). */
+async function callTool(
+  base: string | { baseUrl: string },
+  id: number,
+  name: string,
+  args: unknown,
+  headers: RpcHeaders = {},
+): Promise<unknown> {
+  const baseUrl = typeof base === 'string' ? base : base.baseUrl;
+  const res = await postJsonRpc(
+    baseUrl,
+    { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } },
+    headers,
+  );
+  expect(res.status).toBe(200);
+  const body = res.body as { result?: unknown; error?: { code: number; message: string } };
+  expect(body.error).toBeUndefined();
+  return body.result;
+}
+
+describe('HTTP integration — full JSON-RPC lifecycle (done criteria: transport-level flow)', () => {
+  it(
+    'initialize -> register_agent -> save_document -> search_documents -> request_send -> request_poll -> request_respond -> request_status',
+    async () => {
+      const h = await startHttpServer();
+      let id = 0;
+      const next = (): number => ++id;
+      try {
+        // 1. initialize (MCP lifecycle entry)
+        const init = await postJsonRpc(
+          h.baseUrl,
+          {
+            jsonrpc: '2.0',
+            id: next(),
+            method: 'initialize',
+            params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'it', version: '1.0.0' } },
+          },
+          authHeaders(),
+        );
+        expect(init.status).toBe(200);
+        const initResult = init.body as { result: { protocolVersion: string; capabilities: { tools?: unknown } } };
+        expect(initResult.result.protocolVersion).toBe('2025-11-25');
+        expect(initResult.result.capabilities.tools).toBeDefined();
+
+        // 2. initialized notification (id-less) -> 202
+        const notif = await postJsonRpc(h.baseUrl, { jsonrpc: '2.0', method: 'notifications/initialized' }, authHeaders());
+        expect(notif.status).toBe(202);
+
+        // 3. tools/list over HTTP
+        const list = await postJsonRpc(h.baseUrl, { jsonrpc: '2.0', id: next(), method: 'tools/list', params: {} }, authHeaders());
+        const listResult = list.body as { result: { tools: Array<{ name: string }> } };
+        expect(listResult.result.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
+
+        // 4. register both agents (identity from the header, never arguments)
+        const alice = parseOk(
+          await callTool(h, next(), 'register_agent', { name: 'alice', type: 'orchestrator', capabilities: ['memory', 'bus'] }, authHeaders('alice')),
+        ) as { name: string; createdAt: string };
+        expect(alice.name).toBe('alice');
+        expect(new Date(alice.createdAt).getTime()).not.toBeNaN();
+        await callTool(h, next(), 'register_agent', { name: 'bob', type: 'worker', capabilities: ['bus'] }, authHeaders('bob'));
+
+        // 5. save_document
+        const saved = parseOk(
+          await callTool(
+            h,
+            next(),
+            'save_document',
+            { content: 'meeting notes about the bus protocol', author: 'alice', tags: ['notes'], project: 'biblos' },
+            authHeaders('alice'),
+          ),
+        ) as { id: string; content: string };
+        expect(saved.content).toBe('meeting notes about the bus protocol');
+
+        // 6. search_documents (mock embedding seam, no router network)
+        const search = parseOk(
+          await callTool(h, next(), 'search_documents', { query: 'meeting notes', limit: 5 }, authHeaders('alice')),
+        ) as { query: string; count: number; hits: Array<{ document: { id: string } }> };
+        expect(search.count).toBeGreaterThan(0);
+        expect(search.hits.some((hit) => hit.document.id === saved.id)).toBe(true);
+
+        // 7. request_send: alice -> bob, enqueued pendiente (sender from header)
+        const sent = parseOk(
+          await callTool(h, next(), 'request_send', { recipient: 'bob', payload: { task: 'summarize', topic: 'bus' } }, authHeaders('alice')),
+        ) as { id: string; state: string; sender: string; recipient: string };
+        expect(sent.state).toBe('pendiente');
+        expect(sent.sender).toBe('alice');
+        expect(sent.recipient).toBe('bob');
+
+        // 8. request_poll as bob -> en-proceso with the payload
+        const claimed = parseOk(await callTool(h, next(), 'request_poll', {}, authHeaders('bob'))) as {
+          id: string;
+          state: string;
+          payload: unknown;
+        };
+        expect(claimed.id).toBe(sent.id);
+        expect(claimed.state).toBe('en-proceso');
+        expect(claimed.payload).toEqual({ task: 'summarize', topic: 'bus' });
+
+        // 9. request_respond as bob -> completada with a result
+        const done = parseOk(
+          await callTool(h, next(), 'request_respond', { id: sent.id, state: 'completada', result: { summary: 'done' } }, authHeaders('bob')),
+        ) as { state: string; result: unknown };
+        expect(done.state).toBe('completada');
+        expect(done.result).toEqual({ summary: 'done' });
+
+        // 10. request_status (read-only, any caller) reflects the final state
+        const status = parseOk(
+          await callTool(h, next(), 'request_status', { id: sent.id }, authHeaders('alice')),
+        ) as { state: string; result: unknown; sender: string };
+        expect(status.state).toBe('completada');
+        expect(status.result).toEqual({ summary: 'done' });
+        expect(status.sender).toBe('alice');
+      } finally {
+        await h.close();
+      }
+    },
+  );
+});
+
+describe('HTTP integration — identity enforcement on bus tools (REQ-registry, REQ-bus-*)', () => {
+  async function register(h: { baseUrl: string }, name: string, id: number): Promise<void> {
+    await callTool(h.baseUrl, id, 'register_agent', { name, type: 'worker', capabilities: ['bus'] }, authHeaders(name));
+  }
+
+  it('foreign request_poll returns empty and leaves the request pendiente', async () => {
+    const h = await startHttpServer();
+    let id = 0;
+    const next = (): number => ++id;
+    try {
+      await register(h, 'alice', next());
+      await register(h, 'bob', next());
+      await register(h, 'mallory', next());
+      const sent = parseOk(
+        await callTool(h, next(), 'request_send', { recipient: 'bob', payload: 'for bob only' }, authHeaders('alice')),
+      ) as { id: string };
+
+      // mallory is registered but NOT the recipient: empty claim, state untouched
+      const polled = parseOk(await callTool(h, next(), 'request_poll', {}, authHeaders('mallory')));
+      expect(polled).toBeNull();
+      const status = parseOk(await callTool(h, next(), 'request_status', { id: sent.id }, authHeaders('alice'))) as {
+        state: string;
+      };
+      expect(status.state).toBe('pendiente');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('non-recipient request_respond fails with identity_error and leaves state en-proceso', async () => {
+    const h = await startHttpServer();
+    let id = 0;
+    const next = (): number => ++id;
+    try {
+      await register(h, 'alice', next());
+      await register(h, 'bob', next());
+      await register(h, 'mallory', next());
+      const sent = parseOk(
+        await callTool(h, next(), 'request_send', { recipient: 'bob', payload: 'task' }, authHeaders('alice')),
+      ) as { id: string };
+      const claimed = parseOk(await callTool(h, next(), 'request_poll', {}, authHeaders('bob'))) as { id: string; state: string };
+      expect(claimed.state).toBe('en-proceso');
+
+      const error = parseError(
+        await callTool(h, next(), 'request_respond', { id: sent.id, state: 'completada', result: 'stolen' }, authHeaders('mallory')),
+      );
+      expect(error.code).toBe('identity_error');
+
+      const status = parseOk(await callTool(h, next(), 'request_status', { id: sent.id }, authHeaders('bob'))) as {
+        state: string;
+      };
+      expect(status.state).toBe('en-proceso'); // unchanged
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('unregistered sender is rejected by request_send with identity_error', async () => {
+    const h = await startHttpServer();
+    try {
+      await callTool(h.baseUrl, 1, 'register_agent', { name: 'bob', type: 'worker', capabilities: ['bus'] }, authHeaders('bob'));
+      const error = parseError(
+        await callTool(h.baseUrl, 2, 'request_send', { recipient: 'bob', payload: 'hi' }, authHeaders('nobody')),
+      );
+      expect(error.code).toBe('identity_error');
+      expect(error.message).toContain('nobody');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('missing X-Biblos-Agent header on request_send returns invalid_params', async () => {
+    const h = await startHttpServer();
+    try {
+      const error = parseError(await callTool(h.baseUrl, 1, 'request_send', { recipient: 'bob', payload: 'hi' }, authHeaders()));
+      expect(error.code).toBe('invalid_params');
+      expect(error.message).toContain('x-biblos-agent');
+    } finally {
+      await h.close();
+    }
+  });
+});
