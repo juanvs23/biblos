@@ -277,9 +277,13 @@ export class Store {
       for (const node of frontier) {
         const rows =
           type === undefined
-            ? (this.db.prepare('SELECT source_id, type, target_id FROM relations WHERE source_id = ?').all(node) as Relation[])
+            ? (this.db
+                .prepare('SELECT source_id AS sourceId, type, target_id AS targetId FROM relations WHERE source_id = ?')
+                .all(node) as Relation[])
             : (this.db
-                .prepare('SELECT source_id, type, target_id FROM relations WHERE source_id = ? AND type = ?')
+                .prepare(
+                  'SELECT source_id AS sourceId, type, target_id AS targetId FROM relations WHERE source_id = ? AND type = ?',
+                )
                 .all(node, type) as Relation[]);
         for (const edge of rows) {
           edges.push(edge);

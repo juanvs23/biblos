@@ -110,6 +110,7 @@ describe('Store', () => {
     const rel: Relation = { sourceId: a.id, type: 'related', targetId: b.id };
     store.addRelation(rel);
     expect(store.queryGraph(a.id, undefined, 1).edges).toHaveLength(1);
+    expect(store.queryGraph(a.id, undefined, 1).edges[0]).toEqual(rel); // edges map to Relation (camelCase)
 
     expect(store.deleteDocument(a.id)).toBe(true);
 
