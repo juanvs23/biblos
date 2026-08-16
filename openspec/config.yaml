@@ -1,0 +1,58 @@
+# openspec/config.yaml — SDD configuration for biblos
+# Bootstrap created by sdd-init (2026-08-15). Mode: hybrid (openspec + engram).
+
+schema: spec-driven
+
+context: |
+  Project: biblos — multi-agent MCP server with documented vectorized memory,
+    knowledge graph, and an interconnection bus between agents
+    (OpenClaw, OpenCode, Claude Code).
+  Tech stack: TypeScript on Node.js v24.19.0 (npm 11.17.0); official MCP SDK.
+  Architecture: MCP server; llama.cpp router mode on the VPS — port 8085 serving
+    chat (Qwen3.5-4B) + embeddings (nomic-embed-text-v1.5).
+  Status: new project, not a git repo yet, no package.json yet.
+  Style: TypeScript-first; MCP protocol conventions; artifact language English.
+
+strict_tdd: false
+
+testing:
+  strict_tdd: false
+  reason: "No test runner installed or configured in the project (no package.json yet). Node 24 built-in `node --test` is available and vitest/jest are installable via npm; re-enable after scaffolding the test setup."
+  runner: none-configured
+  layers:
+    unit: false
+    integration: false
+    e2e: false
+  coverage: false
+  quality:
+    linter: false
+    type_checker: false
+    formatter: false
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - State which agents (OpenClaw/OpenCode/Claude Code) the change affects
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Keep requirement IDs stable; changes use ADDED/MODIFIED/REMOVED/RENAMED
+  design:
+    - Include sequence diagrams for complex multi-agent flows
+    - Document architecture decisions with rationale
+    - Separate in-process logic from llama.cpp/HTTP boundaries
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns
+      - Do not invent test tooling; use what testing-capabilities declares
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
