@@ -71,11 +71,11 @@ Scope note: one change, one slice (memory + bus together, per user). Work units 
 
 ## Phase 7: Security + MCP Server (REQ-015)
 
-- [ ] 7.1 Create `src/auth.ts` — middleware: Origin allowlist → 403 (missing origin on non-GET → 403); Bearer timingSafeEqual → 401; every request (REQ-015) — done: auth tests — ~70 ln
-- [ ] 7.2 Create `src/server/tools.ts` — 14 zod schemas + McpServer registration; identity from X-Biblos-Agent header, never arguments (REQ-001..014) — done: tools tests — ~220 ln
-- [ ] 7.3 Create `src/index.ts` — Node http + StreamableHTTPServerTransport on `/mcp` (stateless), auth first, 405 non-POST, 404 unknown; bind BIBLOS_HOST:PORT (REQ-015, REQ-017) — done: e2e spawns it — ~90 ln
-- [ ] 7.4 Create `tests/auth.test.ts` — raw HTTP: valid key+origin → 200, bad key → 401, disallowed/missing Origin → 403 (REQ-core-auth) — done: vitest green — ~70 ln
-- [ ] 7.5 Create `tests/tools.test.ts` — 14 tools via transport, temp DB, mocked router fetch; header enforcement (foreign poll empty, non-recipient respond fails) — done: vitest green — ~150 ln
+- [x] 7.1 Create `src/auth.ts` — middleware: Origin allowlist → 403 (missing origin on non-GET → 403); Bearer timingSafeEqual → 401; every request (REQ-015) — done: 20 auth tests green (unit matrix + raw HTTP) — ~95 ln
+- [x] 7.2 Create `src/server/tools.ts` — 14 zod schemas + McpServer registration; identity from X-Biblos-Agent header, never arguments (REQ-001..014) — done: 17 tools tests green; SDK 1.30.0 maps tool errors to isError results (2025-11-25) — ~430 ln
+- [x] 7.3 Create `src/index.ts` — Node http + StreamableHTTPServerTransport on `/mcp` (stateless), auth first, 405 non-POST, 404 unknown; bind BIBLOS_HOST:PORT (REQ-015, REQ-017) — done: fresh transport+McpServer per request (SDK stateless pattern); smoke 401/403/200/405/404 on built dist — ~150 ln
+- [x] 7.4 Create `tests/auth.test.ts` — raw HTTP: valid key+origin → 200, bad key → 401, disallowed/missing Origin → 403 (REQ-core-auth) — done: vitest green — ~150 ln
+- [x] 7.5 Create `tests/tools.test.ts` — 14 tools via transport, temp DB, mocked router fetch; header enforcement (foreign poll empty, non-recipient respond fails); full JSON-RPC lifecycle over StreamableHTTPServerTransport — done: vitest green — ~380 ln
 
 ## Phase 8: E2E Verification
 
