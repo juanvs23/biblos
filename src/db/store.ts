@@ -15,6 +15,9 @@ export interface DocumentFilters {
   offset: number;
 }
 
+/** Update patch: metadata may clear `project` with an explicit null. */
+export type DocumentPatch = Partial<Omit<DocumentRecord, 'project'>> & { project?: string | null };
+
 export interface VectorHit {
   rowid: number;
   distance: number;
@@ -133,7 +136,7 @@ export class Store {
   }
 
   /** Update content/metadata and refresh updated_at; optionally replace the embedding (content change). */
-  updateDocument(id: string, patch: Partial<DocumentRecord>, reembed?: number[]): void {
+  updateDocument(id: string, patch: DocumentPatch, reembed?: number[]): void {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id };
     if (patch.content !== undefined) {
