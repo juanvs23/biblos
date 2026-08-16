@@ -89,5 +89,5 @@ Scope note: one change, one slice (memory + bus together, per user). Work units 
 - [x] 9.2 Create `deploy/apache-vhost.conf` — biblos.coltmandev.dev, ProxyPreserveHost On, ProxyPass / → http://127.0.0.1:8199/ — done: vhost with ProxyPass/ProxyPassReverse to loopback-only upstream + a2enmod/a2ensite/certbot install notes — ~25 ln
 - [ ] 9.3 VPS: verify sqlite-vec prebuild for Node 22 ABI 115 linux-x64; fallback node-gyp (build-essential+python3); create /opt/biblos + biblos user; install + build dist — ~20 ln
 - [ ] 9.4 VPS: `systemctl enable --now biblos`; loopback smoke `curl -H "Authorization: Bearer $KEY" 127.0.0.1:8199/mcp` → expected 401/200 — ~10 ln
-- [ ] 9.5 DNS+TLS: Cloudflare A record → 62.171.164.5; `certbot --apache -d biblos.coltmandev.dev`; enable vhost + `apachectl reload` — ~10 ln
+- [ ] 9.5 DNS+TLS: Cloudflare A record → el IP público del servidor; `certbot --apache -d biblos.coltmandev.dev`; enable vhost + `apachectl reload` — ~10 ln
 - [x] 9.6 Create `docs/clients.md` — OpenClaw (streamable-http) + OpenCode (remote, Bearer, oauth:false) integration steps (REQ-core-client-docs) — done: doc covers shared 3-header auth model (Authorization/Origin/X-Biblos-Agent), registration-first rule, OpenCode remote config, OpenClaw streamable-http + secret-store key, Claude Code CLI, curl smoke — ~110 ln

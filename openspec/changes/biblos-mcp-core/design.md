@@ -203,7 +203,7 @@ Package: `package.json` (engines `node >=22`), `tsconfig.json` (ES2022, NodeNext
 | `BIBLOS_FUSION_WEIGHT` | `0.5` | hybrid weight |
 | `BIBLOS_EMBED_TIMEOUT_MS` | `10000` | router timeout |
 
-Deploy (`deploy/biblos.service`): `ExecStart=/usr/bin/node /opt/biblos/dist/index.js`, `EnvironmentFile=/etc/biblos/biblos.env`, `Restart=always`. Apache: copy `openclaw.conf` pattern — vhost `biblos.coltmandev.dev`, `ProxyPreserveHost On`, `ProxyPass / http://127.0.0.1:8199/`; steps: (1) Cloudflare A record → 62.171.164.5, (2) `certbot --apache -d biblos.coltmandev.dev`, (3) enable vhost, `apachectl reload`. **sqlite-vec note**: prefer the prebuilt binary matching Node 22 (ABI 115, linux-x64); if absent, `node-gyp` build needs `build-essential` + `python3` on the VPS — verify in apply before relying on prebuilds. WAL checkpoint + file copy = backup; `systemctl stop biblos` = rollback (data intact).
+Deploy (`deploy/biblos.service`): `ExecStart=/usr/bin/node /opt/biblos/dist/index.js`, `EnvironmentFile=/etc/biblos/biblos.env`, `Restart=always`. Apache: copy `openclaw.conf` pattern — vhost `biblos.coltmandev.dev`, `ProxyPreserveHost On`, `ProxyPass / http://127.0.0.1:8199/`; steps: (1) Cloudflare A record → the server's public IP, (2) `certbot --apache -d biblos.coltmandev.dev`, (3) enable vhost, `apachectl reload`. **sqlite-vec note**: prefer the prebuilt binary matching Node 22 (ABI 115, linux-x64); if absent, `node-gyp` build needs `build-essential` + `python3` on the VPS — verify in apply before relying on prebuilds. WAL checkpoint + file copy = backup; `systemctl stop biblos` = rollback (data intact).
 
 ## Testing Strategy (vitest)
 
