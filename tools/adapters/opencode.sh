@@ -83,7 +83,7 @@ write_config() {
 }
 
 # ---------------------------------------------------------------------------
-# smoke_test
+# smoke_test — delegates to shared smoke_test_curl (core.sh)
 # ---------------------------------------------------------------------------
 
 smoke_test() {
@@ -91,22 +91,11 @@ smoke_test() {
   local name="$2"
   local key="$3"
 
-  local status_code
-  status_code=$(curl --silent --show-error --max-time 30 --write-out "%{http_code}" \
-    -X POST "$url" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $key" \
-    -H "Origin: $url" \
-    -H "X-Biblos-Agent: $name" \
-    -d '{"jsonrpc":"2.0","method":"initialize","id":1}')
-
-  if [[ "$status_code" != "200" && "$status_code" != "202" ]]; then
-    log_error "OpenCode smoke test failed: HTTP $status_code"
-    return 1
+  if smoke_test_curl "$url" "$name" "$key" "OpenCode"; then
+    log_info "OpenCode smoke test passed."
+    return 0
   fi
-
-  log_info "OpenCode smoke test passed (HTTP $status_code)."
-  return 0
+  return 1
 }
 
 # ---------------------------------------------------------------------------

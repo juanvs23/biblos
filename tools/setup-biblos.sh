@@ -46,6 +46,48 @@ ADAPTERS=(
 )
 
 # ---------------------------------------------------------------------------
+# Adapter lookup (T014 — REQ-015)
+# Returns the file path for a given agent type, or exits 1 if not found.
+# ---------------------------------------------------------------------------
+
+get_adapter_file() {
+  local agent_type="$1"
+  for entry in "${ADAPTERS[@]}"; do
+    local name="${entry%%:*}"
+    local file="${entry#*:}"
+    if [[ "$name" == "$agent_type" ]]; then
+      echo "$file"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Config file path per agent type (T015)
+# Claude Code has no config file — returns empty string.
+# ---------------------------------------------------------------------------
+
+get_config_file() {
+  local agent_type="$1"
+  case "$agent_type" in
+    opencode)    echo "$HOME/.config/opencode/opencode.json" ;;
+    openclaw)    echo "$HOME/.openclaw/openclaw.json" ;;
+    claude-code) echo "" ;;
+    *)           echo "" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Exit codes (NFR-004)
+# ---------------------------------------------------------------------------
+
+EXIT_SUCCESS=0
+EXIT_ROLLBACK=1
+EXIT_CONFIG_ERROR=2
+EXIT_NETWORK_ERROR=3
+
+# ---------------------------------------------------------------------------
 # Trap handlers (NFR-004)
 # ---------------------------------------------------------------------------
 
@@ -54,7 +96,7 @@ trap '[[ -f "$TMPFILE" ]] && rm -f "$TMPFILE"' EXIT
 
 cleanup() {
   log_info "Cleaning up..."
-  [[ -f "$TMPFILE" ]] && rm -f "$TMPFILE"
+  [[ -f "$TMPFILE" ]] && rm -f "$TMPFILE" || true
 }
 trap cleanup EXIT
 
@@ -196,94 +238,91 @@ main() {
   # Step 6: Source adapter and run flow
   echo "--- Step 6 of 7: Apply Configuration ---"
 
-  # Find adapter file
-  local adapter_file=""
-  for entry in "${ADAPTERS[@]}"; do
-    local name="${entry%%:*}"
-    local file="${entry#*:}"
-    if [[ "$name" == "$agent_type" ]]; then
-      adapter_file="$file"
-      break
-    fi
-  done
+  # Look up adapter file via registry (T014)
+  local adapter_file
+  adapter_file=$(get_adapter_file "$agent_type")
+  local lookup_rc=$?
 
-  if [[ -z "$adapter_file" ]]; then
+  if [[ $lookup_rc -ne 0 ]] || [[ -z "$adapter_file" ]]; then
     log_error "Unknown agent type: $agent_type"
-    exit 1
+    exit $EXIT_CONFIG_ERROR
+  fi
+
+  if [[ ! -f "$adapter_file" ]]; then
+    log_error "Adapter file not found: $adapter_file"
+    exit $EXIT_CONFIG_ERROR
   fi
 
   # Source the adapter
-  if [[ -f "$adapter_file" ]]; then
-    source "$adapter_file"
-    log_info "Loaded adapter: $adapter_file"
-  else
-    log_error "Adapter not found: $adapter_file"
-    exit 1
-  fi
+  source "$adapter_file"
+  log_info "Loaded adapter: $adapter_file"
 
-  # Determine config file path for this adapter
-  local config_file=""
-  case "$agent_type" in
-    opencode)    config_file="$HOME/.config/opencode/opencode.json" ;;
-    openclaw)    config_file="$HOME/.openclaw/openclaw.json" ;;
-    claude-code) config_file="" ;;  # Claude Code uses CLI, no config file
-  esac
+  # Determine config file path for this adapter (T015)
+  local config_file
+  config_file=$(get_config_file "$agent_type")
 
-  # Backup if we have a config file
+  # Track rollback state for summary
+  local rollback_occurred="no"
+  local backup_path=""
+
+  # Backup + Write + Smoke test + Rollback flow (T015 — REQ-011)
   if [[ -n "$config_file" ]]; then
+    # --- Config-file agents (OpenCode, OpenClaw) ---
     log_info "Creating backup..."
-    local backup_path
     backup_path=$(create_backup "$config_file")
     log_info "Backup created: $backup_path"
 
     # Write config
     log_info "Writing configuration..."
-    if write_config "$url" "$agent_name" "$api_key"; then
-      log_info "✅ Config written successfully."
-    else
+    if ! write_config "$url" "$agent_name" "$api_key"; then
       log_error "❌ Failed to write config."
-      exit 1
+      exit $EXIT_CONFIG_ERROR
     fi
+    log_info "✅ Config written successfully."
 
     # Smoke test
     log_info "Running smoke test..."
     if smoke_test "$url" "$agent_name" "$api_key"; then
       log_info "✅ Smoke test passed."
 
-      # Register agent (best-effort)
+      # Register agent (best-effort, non-blocking)
       log_info "Registering agent on server..."
       register_agent "$url" "$agent_name" "$agent_type" "$api_key"
     else
+      # Smoke test failure → rollback (REQ-011)
       log_error "❌ Smoke test failed. Restoring backup..."
-      restore_backup "$config_file" "$backup_path"
-      log_info "Restored from $backup_path"
-      exit 1
+      if restore_backup "$config_file" "$backup_path"; then
+        rollback_occurred="yes"
+        log_info "Restored from $backup_path"
+      else
+        log_error "Critical: rollback also failed!"
+      fi
+      exit $EXIT_ROLLBACK
     fi
   else
-    # Claude Code: no config file, just write via CLI
+    # --- CLI-only agent (Claude Code) — no config file, no backup ---
     log_info "Writing configuration via CLI..."
-    if write_config "$url" "$agent_name" "$api_key"; then
-      log_info "✅ Config written successfully."
-    else
+    if ! write_config "$url" "$agent_name" "$api_key"; then
       log_error "❌ Failed to write config."
-      exit 1
+      exit $EXIT_CONFIG_ERROR
     fi
+    log_info "✅ Config written successfully."
 
     # Smoke test
     log_info "Running smoke test..."
     if smoke_test "$url" "$agent_name" "$api_key"; then
       log_info "✅ Smoke test passed."
 
-      # Register agent (best-effort)
+      # Register agent (best-effort, non-blocking)
       log_info "Registering agent on server..."
       register_agent "$url" "$agent_name" "$agent_type" "$api_key"
     else
       log_error "❌ Smoke test failed."
-      exit 1
+      exit $EXIT_NETWORK_ERROR
     fi
   fi
 
-  # Step 7: Summary
+  # Step 7: Summary (REQ-018)
   echo ""
   echo "--- Step 7 of 7: Summary ---"
   echo "✅ Configuration complete!"
@@ -293,6 +332,10 @@ main() {
   if [[ -n "$config_file" ]]; then
     echo "   Config: $config_file"
     echo "   Backup: $backup_path"
+  fi
+  if [[ "$rollback_occurred" == "yes" ]]; then
+    echo ""
+    echo "⚠️  Rollback was performed. Config restored from backup."
   fi
   echo ""
   echo "🔑 Save your API key (shown above). It won't be displayed again."

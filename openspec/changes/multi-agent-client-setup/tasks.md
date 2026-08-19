@@ -19,16 +19,16 @@
 - [x] T006: Main script flow (`setup-biblos.sh` — orchestration, flag parsing, trap handlers)
 - [x] T007: Agent registration (`lib/core.sh` — `register_agent` function)
 
-## Phase 2: Adapters + Smoke Tests (T008-T015) — Work Unit 2
+## Phase 2: Adapters + Smoke Tests (T008-T015) — Work Unit 2 ✅ COMPLETE
 
-- [ ] T008: OpenCode adapter — config write (`adapters/opencode.sh`)
-- [ ] T009: OpenCode adapter — smoke test + adapter interface (`adapters/opencode.sh`)
-- [ ] T010: OpenClaw adapter — config write (`adapters/openclaw.sh`)
-- [ ] T011: OpenClaw adapter — smoke test + secret store (`adapters/openclaw.sh`)
-- [ ] T012: Claude Code adapter — CLI detection + graceful skip (`adapters/claude-code.sh`)
-- [ ] T013: Claude Code adapter — smoke test + CLI invocation (`adapters/claude-code.sh`)
-- [ ] T014: Adapter registry and dispatch (`setup-biblos.sh`)
-- [ ] T015: End-to-end smoke test wiring (integration of adapter flow)
+- [x] T008: OpenCode adapter — config write (`adapters/opencode.sh`)
+- [x] T009: OpenCode adapter — smoke test + adapter interface (`adapters/opencode.sh`)
+- [x] T010: OpenClaw adapter — config write (`adapters/openclaw.sh`)
+- [x] T011: OpenClaw adapter — smoke test + secret store (`adapters/openclaw.sh`)
+- [x] T012: Claude Code adapter — CLI detection + graceful skip (`adapters/claude-code.sh`)
+- [x] T013: Claude Code adapter — smoke test + CLI invocation (`adapters/claude-code.sh`)
+- [x] T014: Adapter registry and dispatch (`setup-biblos.sh` — `get_adapter_file()`)
+- [x] T015: End-to-end smoke test wiring (integration of adapter flow, rollback, summary)
 
 ## Phase 3: Testing & Polish (T016-T020) — Work Unit 3
 

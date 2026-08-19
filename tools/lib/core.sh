@@ -108,3 +108,59 @@ curl_json() {
 
   curl "${curl_args[@]}" "$url"
 }
+
+# ---------------------------------------------------------------------------
+# Shared smoke test — curl-based connection verification (REQ-009)
+# Used by all adapters; each adapter wraps it in its own smoke_test() with
+# adapter-specific naming/logging.
+#
+# Args: <server_url> <agent_name> <api_key>
+# Returns: 0 on success (HTTP 200/202 + valid JSON), 1 on failure
+# ---------------------------------------------------------------------------
+
+smoke_test_curl() {
+  local url="$1"
+  local name="$2"
+  local key="$3"
+  local adapter_name="${4:-}"
+
+  # Step 1: Check HTTP status code (body discarded via -o /dev/null)
+  local status_code
+  status_code=$(curl --silent --show-error --max-time 30 --write-out "%{http_code}" -o /dev/null \
+    -X POST "$url" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $key" \
+    -H "Origin: $url" \
+    -H "X-Biblos-Agent: $name" \
+    -d '{"jsonrpc":"2.0","method":"initialize","id":1}')
+
+  if [[ "$status_code" != "200" && "$status_code" != "202" ]]; then
+    local msg="Smoke test failed: HTTP $status_code"
+    if [[ -n "$adapter_name" ]]; then
+      msg="$adapter_name $msg"
+    fi
+    log_error "$msg"
+    return 1
+  fi
+
+  # Step 2: Validate response body is valid JSON (REQ-009)
+  local response
+  response=$(curl --silent --show-error --max-time 30 \
+    -X POST "$url" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $key" \
+    -H "Origin: $url" \
+    -H "X-Biblos-Agent: $name" \
+    -d '{"jsonrpc":"2.0","method":"initialize","id":1}')
+
+  if ! echo "$response" | jq empty 2>/dev/null; then
+    local msg="Smoke test: response is not valid JSON"
+    if [[ -n "$adapter_name" ]]; then
+      msg="$adapter_name $msg"
+    fi
+    log_error "$msg"
+    return 1
+  fi
+
+  return 0
+}
