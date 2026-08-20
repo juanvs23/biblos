@@ -1,6 +1,6 @@
 # Biblos MCP — Roadmap de lo faltante
 
-> Estado: 2026-08-20 (multi-agent-client-setup completado y archivado)
+> Estado: 2026-08-20 (prueba local OpenCode completada; fixes post-archive en `d1b1a98`)
 > Proyecto: /mnt/1TB/IA/mcp/biblos · VPS: coltmandev.dev
 > Repo público: https://github.com/juanvs23/biblos (MIT)
 
@@ -36,9 +36,11 @@ CLI autoejecutable para conectar OpenCode, OpenClaw, Claude Code a Biblos self-h
 | Tasks | ✅ `tasks.md` (20 tareas, 7 fases) |
 | WU1 (Core+TUI) | ✅ T001-T007 completados — `tools/setup-biblos.sh`, `tools/lib/*.sh`, `tools/adapters/*.sh` |
 | WU2 (Adapters+Smoke) | ✅ T008-T015 completados — smoke tests compartidos, wiring E2E, rollback |
-| WU3 (Testing+Polish) | ✅ T016-T020 completados — `tools/tests/` (81/81 tests) |
+| WU3 (Testing+Polish) | ✅ T016-T020 completados — `tools/tests/` (82/82 tests) |
 | Verify | ✅ PASS — 81/81 tests, 19/19 REQ, 73/73 escenarios, 0 CRITICAL/WARNING (re-run abb48cee) |
 | Archive | ✅ completado (archive/2026-08-20-multi-agent-client-setup) |
+| Fixes post-archive (prueba local) | ✅ commit `d1b1a98` — 4 bugs reales corregidos (Origin 403, key compartida 401, Accept 406, registro JSON-RPC 400) |
+| Prueba local OpenCode | ✅ **COMPLETADA** — config escrita, smoke 200, agente `thin15` registrado en servidor (verificado DB) |
 | Prueba local OpenClaw | 🔲 PENDIENTE (post-archive) — instalar OpenClaw en local, probar MCP, confirmar funcionamiento |
 
 ## Siguientes pasos (orden)
@@ -49,12 +51,7 @@ CLI autoejecutable para conectar OpenCode, OpenClaw, Claude Code a Biblos self-h
 - Probar conexión y herramientas
 - Confirmar que funciona correctamente
 
-### 2. Prueba local con OpenCode
-- Instalar/verificar MCP de Biblos en OpenCode
-- Configurar `~/.config/opencode/opencode.json`
-- Probar conexión y herramientas
-
-### 3. Post-archive (mejoras futuras, fuera de slice 1)
+### 2. Post-archive (mejoras futuras, fuera de slice 1)
 - Activar integración real de clientes (OpenClaw mcp.servers.biblos, OpenCode mcp.biblos, Hermes Agent mcp_servers.biblos) — requiere definir Origin de cada cliente en `BIBLOS_ALLOWED_ORIGINS` y exponer por Apache `https://biblos.coltmandev.dev/mcp` (Streamable HTTP, ya implementado).
 - Ecosistema open-source: CI GitHub Actions, badges, CONTRIBUTING, `.github/` templates.
 - Ranking híbrido: calibrar peso con corpus real.
@@ -63,7 +60,7 @@ CLI autoejecutable para conectar OpenCode, OpenClaw, Claude Code a Biblos self-h
 - Convertir el router llama.cpp a systemd (hoy corre con nohup).
 - Arreglar el MCP github de opencode (wrapper con el token falla: "Authentication Failed").
 
-### 4. Evaluación opcional de agentes alternativos (16 Ago 2026)
+### 3. Evaluación opcional de agentes alternativos (16 Ago 2026)
 - **Conclusión**: NO migrar de OpenClaw. Opcional probar Hermes Agent en paralelo (vive en `~/.hermes/`, no toca `~/.openclaw/`) — Telegram o 2º número, `hermes claw migrate --dry-run` para vista previa. Pi descartado como asistente (es coding agent).
 - Si se prueba Hermes: apuntarlo a Ollama (`localhost:11434/v1`) u Ollama Cloud (misma key, `gemma4:31b-cloud`); NO emparejar su bridge Baileys al mismo número de OpenClaw; NO dejar que haga swap en el router 8085 que usa Biblos para embeddings.
 

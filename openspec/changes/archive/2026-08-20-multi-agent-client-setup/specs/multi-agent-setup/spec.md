@@ -79,21 +79,21 @@ The tool MUST present a numbered list of supported agent types for the user to s
 
 ---
 
-### REQ-004: Generate API Key
+### REQ-004: Use the Shared Server API Key
 
-The tool MUST generate a cryptographically random API key using openssl.
+The tool MUST prompt for the Biblos server's shared API key (`BIBLOS_API_KEY`) and inject it into the client config. The server authenticates every client with ONE shared key, so the tool does NOT generate a per-agent key.
 
 **Acceptance Criteria:**
-- Key generated via `openssl rand -hex 32` (64 hex characters)
-- Key is displayed to the user ONCE with a warning not to share it
-- Key is stored in memory only during the session (not written to disk in plaintext)
-- Key is injected into the client's native secret mechanism
-- Generation failure (openssl unavailable) produces a clear error and exit
+- Prompts for the server API key with a no-echo prompt (`prompt_secret`, `read -rsp`)
+- Rejects an empty key with a clear error and exit
+- Key is injected into the client config's `Authorization` header (and native secret mechanism where applicable)
+- Key is never written to logs, stdout, or backups
+- The tool does NOT display the key back to the user (no-echo input, no re-display)
 
 **Test Approach:**
-- Run tool → key displayed, 64 hex chars
-- Verify key matches pattern `^[0-9a-f]{64}$`
-- Run with `openssl` removed from PATH → clear error, exit code 1
+- Run tool → key is not echoed during input and not re-displayed
+- Verify key appears nowhere in stderr/stdout/backup files, and once in the client config header
+- Empty key → clear error, exit code 1
 
 ---
 
@@ -188,27 +188,36 @@ The Claude Code adapter MUST invoke `claude mcp add` with the correct flags to r
 
 ### REQ-008: Agent Registration on Server
 
-The tool MUST register the agent identity on the Biblos server after config is written.
+The tool MUST register the agent identity on the Biblos server after config is written. Biblos is an MCP server, so registration invokes the MCP tool `register_agent` via a JSON-RPC `tools/call`, not a plain REST POST.
 
 **Acceptance Criteria:**
-- Calls `register_agent` via MCP endpoint after successful config write
-- Payload:
+- After a successful config write and smoke test, invokes the MCP tool `register_agent` via JSON-RPC `tools/call` on the server's MCP endpoint
+- JSON-RPC payload:
   ```json
   {
-    "name": "<agent_name>",
-    "type": "<agent_type>",
-    "capabilities": ["memory", "graph", "bus"]
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "register_agent",
+      "arguments": {
+        "name": "<agent_name>",
+        "type": "<agent_type>",
+        "capabilities": ["memory", "graph", "bus"]
+      }
+    }
   }
   ```
-- Uses the same API key and headers as the client config
-- Verifies registration succeeded (HTTP 201 or 200, no error in response)
-- If registration fails: logs error but does NOT block tool completion (registration is best-effort; agent can register later)
+- Sends the required MCP headers: `Content-Type: application/json`, `Accept: application/json, text/event-stream`, `Authorization: Bearer <key>`, `Origin: <scheme://host>`, `X-Biblos-Agent: <name>`
+- Verifies registration succeeded (HTTP 200/202 and no JSON-RPC `error` in the response body)
+- If registration fails: logs a warning but does NOT block tool completion (registration is best-effort; the agent can register later)
 - Duplicate registration (name already exists) is treated as success (idempotent)
 
 **Test Approach:**
-- Run tool with valid server → agent appears in registry
+- Run tool with valid server → agent appears in registry (JSON-RPC `tools/call` received)
 - Re-run same agent name → no conflict, treated as success
 - Run with unreachable server → warning logged, tool continues
+- Registration rejected by server (JSON-RPC error) → warning logged, tool exits 0
 
 ---
 
@@ -217,7 +226,7 @@ The tool MUST register the agent identity on the Biblos server after config is w
 The tool MUST perform a curl-based smoke test to verify the client can reach and authenticate with the Biblos server.
 
 **Acceptance Criteria:**
-- Sends a test request to the server MCP endpoint with all required headers
+- Sends an MCP `initialize` request to the server MCP endpoint with the required headers: `Content-Type: application/json`, `Accept: application/json, text/event-stream`, `Authorization: Bearer <key>`, `Origin: <scheme://host>` (base, never the `/mcp` path), `X-Biblos-Agent: <name>`
 - Checks for HTTP 200 or 202 response
 - Validates response contains valid JSON
 - Timeout: 30 seconds
