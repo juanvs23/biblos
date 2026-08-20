@@ -1,6 +1,6 @@
 # Biblos MCP — Roadmap de lo faltante
 
-> Estado: 2026-08-20 (prueba local OpenCode completada; fixes post-archive en `d1b1a98`)
+> Estado: 2026-08-20 (prueba local OpenCode + OpenClaw completadas; OpenClaw local desinstalado por decisión; fixes post-archive en `d1b1a98`)
 > Proyecto: /mnt/1TB/IA/mcp/biblos · VPS: coltmandev.dev
 > Repo público: https://github.com/juanvs23/biblos (MIT)
 
@@ -41,15 +41,13 @@ CLI autoejecutable para conectar OpenCode, OpenClaw, Claude Code a Biblos self-h
 | Archive | ✅ completado (archive/2026-08-20-multi-agent-client-setup) |
 | Fixes post-archive (prueba local) | ✅ commit `d1b1a98` — 4 bugs reales corregidos (Origin 403, key compartida 401, Accept 406, registro JSON-RPC 400) |
 | Prueba local OpenCode | ✅ **COMPLETADA** — config escrita, smoke 200, agente `thin15` registrado en servidor (verificado DB) |
-| Prueba local OpenClaw | 🔲 PENDIENTE (post-archive) — instalar OpenClaw en local, probar MCP, confirmar funcionamiento |
+| Prueba local OpenClaw | ✅ **COMPLETADA + DESINSTALADA** — MCP de Biblos instalado (14 tools, smoke PASS, agente `openclaw-local` registrado) y luego OpenClaw local desinstalado (npm -g + servicio user systemd) por decisión del usuario |
 
 ## Siguientes pasos (orden)
 
-### 1. Prueba local con OpenClaw
-- Instalar OpenClaw en local
-- Configurar MCP de Biblos via `openclaw mcp add`
-- Probar conexión y herramientas
-- Confirmar que funciona correctamente
+### 1. Prueba local con OpenClaw — ✅ COMPLETADA y CERRADA (20 Ago 2026)
+- OpenClaw local instalado, MCP de Biblos configurado y verificado (14 tools, smoke PASS, agente `openclaw-local` registrado).
+- Por decisión del usuario, OpenClaw local se **desinstaló** (npm uninstall -g + servicio user systemd deshabilitado). `~/.openclaw/` conservado. El OpenClaw del VPS (coltmandev.dev) sigue intacto y aislado.
 
 ### 2. Post-archive (mejoras futuras, fuera de slice 1)
 - Activar integración real de clientes (OpenClaw mcp.servers.biblos, OpenCode mcp.biblos, Hermes Agent mcp_servers.biblos) — requiere definir Origin de cada cliente en `BIBLOS_ALLOWED_ORIGINS` y exponer por Apache `https://biblos.coltmandev.dev/mcp` (Streamable HTTP, ya implementado).
