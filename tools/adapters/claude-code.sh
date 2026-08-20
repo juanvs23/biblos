@@ -43,7 +43,7 @@ write_config() {
   log_info "Running: claude mcp add --transport http biblos..."
   claude mcp add --transport http biblos "$url" \
     --header "Authorization: Bearer $key" \
-    --header "Origin: $url" \
+    --header "Origin: $(origin_of "$url")" \
     --header "X-Biblos-Agent: $name" 2>&1 | while read -r line; do
       log_info "claude: $line"
   done

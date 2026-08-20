@@ -61,12 +61,13 @@ write_config() {
   local tmp_file="${OPENCLAW_CONFIG}.tmp"
   if ! jq --arg url "$url" \
      --arg name "$name" \
+     --arg origin "$(origin_of "$url")" \
      '.mcp.servers.biblos = {
        type: "streamable-http",
        url: $url,
        enabled: true,
        headers: {
-         "Origin": $url,
+         "Origin": $origin,
          "X-Biblos-Agent": $name
        }
      }' "$OPENCLAW_CONFIG" > "$tmp_file"; then

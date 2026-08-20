@@ -13,6 +13,8 @@ source "$SCRIPT_DIR/helpers.sh"
 
 ADAPTER="$TOOLS_DIR/adapters/openclaw.sh"
 URL="http://localhost:8199/mcp"
+# Origin header is the scheme://host base, NEVER the /mcp path.
+ORIGIN="http://localhost:8199"
 NAME="test-agent-01"
 KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
@@ -27,7 +29,7 @@ test_wc_creates_structure() {
   assert_json_eq "$CONFIG" '.mcp.servers.biblos.type' "streamable-http" || return 1
   assert_json_eq "$CONFIG" '.mcp.servers.biblos.url' "$URL" || return 1
   assert_json_eq "$CONFIG" '.mcp.servers.biblos.enabled' "true" || return 1
-  assert_json_eq "$CONFIG" '.mcp.servers.biblos.headers.Origin' "$URL" || return 1
+  assert_json_eq "$CONFIG" '.mcp.servers.biblos.headers.Origin' "$ORIGIN" || return 1
   assert_json_eq "$CONFIG" '.mcp.servers.biblos.headers["X-Biblos-Agent"]' "$NAME" || return 1
   # REQ-006: Authorization comes from the secret store, never inline
   assert_json_true "$CONFIG" '.mcp.servers.biblos.headers | has("Authorization") | not' || return 1

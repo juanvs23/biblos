@@ -12,6 +12,8 @@ source "$SCRIPT_DIR/helpers.sh"
 
 ADAPTER="$TOOLS_DIR/adapters/claude-code.sh"
 URL="http://localhost:8199/mcp"
+# Origin header is the scheme://host base, NEVER the /mcp path.
+ORIGIN="http://localhost:8199"
 NAME="test-agent-01"
 KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
@@ -39,7 +41,7 @@ test_wc_runs_claude_mcp_add() {
   assert_eq "$rc" "0" || return 1
   assert_contains "$(cat "$log")" "mcp add --transport http biblos $URL" || return 1
   assert_contains "$(cat "$log")" "--header Authorization: Bearer $KEY" || return 1
-  assert_contains "$(cat "$log")" "--header Origin: $URL" || return 1
+  assert_contains "$(cat "$log")" "--header Origin: $ORIGIN" || return 1
   assert_contains "$(cat "$log")" "--header X-Biblos-Agent: $NAME" || return 1
   assert_contains "$err" "config written via CLI" || return 1
 }

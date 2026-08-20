@@ -63,6 +63,7 @@ write_config() {
   if ! jq --arg url "$url" \
      --arg key "$key" \
      --arg name "$name" \
+     --arg origin "$(origin_of "$url")" \
      '.mcp.biblos = {
        type: "remote",
        url: $url,
@@ -70,7 +71,7 @@ write_config() {
        oauth: false,
        headers: {
          "Authorization": "Bearer " + $key,
-         "Origin": $url,
+         "Origin": $origin,
          "X-Biblos-Agent": $name
        }
      }' "$OPENCODE_CONFIG" > "$tmp_file"; then

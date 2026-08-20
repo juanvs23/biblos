@@ -262,11 +262,17 @@ main() {
   log_info "Agent type: $agent_type"
   echo ""
 
-  # Step 4: Generate API key (REQ-004)
-  echo "--- Step 4 of 7: Generate API Key ---"
+  # Step 4: Prompt for the shared server API key (BIBLOS_API_KEY)
+  # The Biblos server authenticates every client with ONE shared API key
+  # (BIBLOS_API_KEY). The tool does NOT generate a per-agent key — it asks the
+  # user for the server's key and injects it into the client config.
+  echo "--- Step 4 of 7: Server API Key ---"
   local api_key
-  api_key=$(generate_key)
-  display_key "$api_key"
+  api_key=$(prompt_secret "Enter the Biblos server API key (BIBLOS_API_KEY)")
+  if [[ -z "$api_key" ]]; then
+    log_error "API key cannot be empty."
+    exit 1
+  fi
   echo ""
 
   # Step 5: Confirmation (REQ-016)

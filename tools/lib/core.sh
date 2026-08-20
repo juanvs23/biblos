@@ -47,6 +47,24 @@ check_deps() {
 }
 
 # ---------------------------------------------------------------------------
+# Origin derivation (Origin header must be scheme://host, never a path)
+# ---------------------------------------------------------------------------
+
+origin_of() {
+  # Derive the Origin (scheme://host, no path) from a full MCP URL so the
+  # Origin header sent by this tool and written into client configs matches
+  # BIBLOS_ALLOWED_ORIGINS exactly. The Origin header NEVER carries a path.
+  local url="$1"
+  local origin
+  origin=$(printf '%s' "$url" | sed -E 's#^(https?://[^/]+).*$#\1#')
+  if [[ "$origin" == "$url" ]]; then
+    # No scheme://host matched — fall back to a sanitized host-only origin.
+    origin=$(printf '%s' "$url" | sed -E 's#^([^/:]+).*$#\1#')
+  fi
+  echo "$origin"
+}
+
+# ---------------------------------------------------------------------------
 # API key generation (REQ-004)
 # ---------------------------------------------------------------------------
 
@@ -66,23 +84,42 @@ generate_key() {
 register_agent() {
   local url="$1" name="$2" type="$3" key="$4"
 
-  local status_code
+  local status_code body
   # `|| status_code="000"`: when the server is unreachable curl exits non-zero
   # (e.g. connection refused) and would trip `set -e`; the write-out still
   # yields "000" in that case, so fall back explicitly and keep the
   # best-effort contract (warn + continue, never block).
-  status_code=$(curl --silent --show-error --max-time 30 --write-out "%{http_code}" -o /dev/null \
+  #
+  # Biblos is an MCP server: agents are registered by invoking the MCP tool
+  # `register_agent` via a JSON-RPC `tools/call`, NOT by a plain REST POST.
+  # A successful call returns HTTP 200/202 with a JSON-RPC result (no `error`);
+  # an application-level failure returns HTTP 200 with a JSON-RPC `error`
+  # payload, which we detect by inspecting the response body.
+  #
+  # `-w $'\n%{http_code}'` appends the status on its own trailing line so the
+  # body and status can be separated cleanly regardless of body framing.
+  local raw
+  raw=$(curl --silent --show-error --max-time 30 --write-out $'\n%{http_code}' \
     -X POST "$url" \
     -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
     -H "Authorization: Bearer $key" \
-    -H "Origin: $url" \
+    -H "Origin: $(origin_of "$url")" \
     -H "X-Biblos-Agent: $name" \
     -d "$(jq -n --arg n "$name" --arg t "$type" \
-       '{name:$n, type:$t, capabilities:["memory","graph","bus"]}')") \
-    || status_code="000"
+       '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"register_agent",arguments:{name:$n,type:$t,capabilities:["memory","graph","bus"]}}}')") \
+    || raw="\n000"
+
+  status_code=$(printf '%s' "$raw" | tail -n1 | tr -d '\r')
+  local payload
+  payload=$(printf '%s' "$raw" | sed '$d')
 
   if [[ "$status_code" == "201" || "$status_code" == "200" ]]; then
-    log_info "Agent '$name' registered on server."
+    if ! echo "$payload" | grep -q '"error"'; then
+      log_info "Agent '$name' registered on server."
+      return 0
+    fi
+    log_warn "Agent registration rejected by server: $(echo "$payload" | jq -r '.error.message // "unknown"' 2>/dev/null) (best-effort, continuing)."
     return 0
   fi
 
@@ -102,8 +139,9 @@ curl_json() {
     --silent --show-error --max-time 30
     -X "$method"
     -H "Content-Type: application/json"
+    -H "Accept: application/json, text/event-stream"
     -H "Authorization: Bearer $key"
-    -H "Origin: $url"
+    -H "Origin: $(origin_of "$url")"
     -H "X-Biblos-Agent: $name"
   )
 
@@ -134,8 +172,9 @@ smoke_test_curl() {
   status_code=$(curl --silent --show-error --max-time 30 --write-out "%{http_code}" -o /dev/null \
     -X POST "$url" \
     -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
     -H "Authorization: Bearer $key" \
-    -H "Origin: $url" \
+    -H "Origin: $(origin_of "$url")" \
     -H "X-Biblos-Agent: $name" \
     -d '{"jsonrpc":"2.0","method":"initialize","id":1}')
 
@@ -153,8 +192,9 @@ smoke_test_curl() {
   response=$(curl --silent --show-error --max-time 30 \
     -X POST "$url" \
     -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
     -H "Authorization: Bearer $key" \
-    -H "Origin: $url" \
+    -H "Origin: $(origin_of "$url")" \
     -H "X-Biblos-Agent: $name" \
     -d '{"jsonrpc":"2.0","method":"initialize","id":1}')
 

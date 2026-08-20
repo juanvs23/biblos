@@ -5,10 +5,10 @@
 # Drives the real main script non-interactively (stdin piped) against an
 # isolated $HOME and the python3 mock MCP server.
 #
-# Covers REQ-001/002/003 (prompts drive the flow), REQ-004 (keygen), REQ-005/
-# 006/007 (per-adapter flow), REQ-008 (register_agent), REQ-009 (smoke test),
-# REQ-011 (rollback + --restore), REQ-012 (idempotency), REQ-016 (cancel),
-# REQ-019 (--help / unknown flag), REQ-017 (missing claude CLI).
+# Covers REQ-001/002/003 (prompts drive the flow), REQ-004 (shared key prompt),
+# REQ-005/006/007 (per-adapter flow), REQ-008 (register_agent), REQ-009 (smoke
+# test), REQ-011 (rollback + --restore), REQ-012 (idempotency), REQ-016
+# (cancel), REQ-019 (--help / unknown flag), REQ-017 (missing claude CLI).
 # =============================================================================
 
 set -u
@@ -16,6 +16,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/helpers.sh"
 
 NAME="test-agent-01"
+# Shared server API key (BIBLOS_API_KEY). The tool does NOT generate a key
+# anymore — it prompts for this shared key with no echo, so it must never
+# appear in the tool's output, only inside the config's Authorization header.
+KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 make_sandbox
 OPENC="$HOME/.config/opencode/opencode.json"
@@ -24,11 +28,6 @@ OPENCLAW="$HOME/.openclaw/openclaw.json"
 INPUT=$(mktemp "${TMPDIR:-/tmp}/biblos-input.XXXXXX")
 write_input() { printf '%s\n' "$@" > "$INPUT"; }
 
-# The API key is displayed once on stderr; extract it for leakage assertions.
-extract_key() {
-  grep -oE '[0-9a-f]{64}' "$SETUP_ERR" | head -1
-}
-
 # --- Full happy path ----------------------------------------------------------
 
 test_happy_path() {
@@ -36,7 +35,9 @@ test_happy_path() {
   OPENC="$HOME/.config/opencode/opencode.json"
   : > "$MOCK_LOG"
   local url="http://127.0.0.1:$MOCK_PORT/mcp"
-  write_input "$url" "$NAME" "1" "y"
+  # Origin header is the scheme://host base (no /mcp path).
+  local origin="http://127.0.0.1:$MOCK_PORT"
+  write_input "$url" "$NAME" "1" "$KEY" "y"
   run_setup "$INPUT"
   assert_eq "$SETUP_RC" "0" || return 1
 
@@ -56,7 +57,7 @@ test_happy_path() {
 
   # smoke request carried the expected headers (REQ-009)
   assert_jsonl_eq "$MOCK_LOG" '[.[] | select(.body | contains("initialize"))][0].headers["X-Biblos-Agent"]' "$NAME" || return 1
-  assert_jsonl_eq "$MOCK_LOG" '[.[] | select(.body | contains("initialize"))][0].headers.Origin' "$url" || return 1
+  assert_jsonl_eq "$MOCK_LOG" '[.[] | select(.body | contains("initialize"))][0].headers.Origin' "$origin" || return 1
 
   # registration payload reached the server (REQ-008)
   local reg_body auth
@@ -66,14 +67,14 @@ test_happy_path() {
   auth=$(jq -sr '[.[] | select(.body | contains("initialize"))][0].headers.Authorization' "$MOCK_LOG")
   assert_contains "$auth" "Bearer " || return 1
 
-  # REQ-013 / NFR-003: key appears exactly once (the one-time display, stderr)
-  local key
-  key=$(extract_key)
-  assert_eq "$(grep -o "$key" "$SETUP_ERR" | wc -l)" "1" || return 1
-  assert_eq "$(grep -c "$key" "$SETUP_OUT")" "0" || return 1
-  assert_eq "$(grep -c "$key" "$(ls "$OPENC".backup.* 2>/dev/null | head -1)")" "0" || return 1
+  # REQ-013 / NFR-003: the shared key is entered with NO echo (prompt_secret),
+  # so it must NOT appear on stderr, stdout, or in any backup — only inside
+  # the config's sanctioned Authorization header.
+  assert_eq "$(grep -c "$KEY" "$SETUP_ERR")" "0" || return 1
+  assert_eq "$(grep -c "$KEY" "$SETUP_OUT")" "0" || return 1
+  assert_eq "$(grep -c "$KEY" "$(ls "$OPENC".backup.* 2>/dev/null | head -1)")" "0" || return 1
   # the config itself carries the key via the sanctioned inline header
-  assert_eq "$(grep -c "$key" "$OPENC")" "1" || return 1
+  assert_eq "$(grep -c "$KEY" "$OPENC")" "1" || return 1
 
   # registration succeeded against the mock (200) — REQ-008 best-effort
   assert_contains "$(cat "$SETUP_ERR")" "registered on server" || return 1
@@ -86,7 +87,7 @@ test_rollback_on_401() {
   OPENC="$HOME/.config/opencode/opencode.json"
   mkdir -p "$(dirname "$OPENC")"
   echo '{"mcp":{"other":{"type":"stdio","command":"legacy"}}}' > "$OPENC"
-  write_input "http://127.0.0.1:$MOCK_PORT/unauthorized" "$NAME" "1" "y"
+  write_input "http://127.0.0.1:$MOCK_PORT/unauthorized" "$NAME" "1" "$KEY" "y"
   run_setup "$INPUT"
   assert_eq "$SETUP_RC" "1" || return 1
   # config restored to the pre-write state
@@ -111,7 +112,7 @@ test_rollback_unreachable_server() {
   echo '{"original":"marker"}' > "$OPENC"
   local dead_port
   dead_port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
-  write_input "http://127.0.0.1:$dead_port/mcp" "$NAME" "1" "y"
+  write_input "http://127.0.0.1:$dead_port/mcp" "$NAME" "1" "$KEY" "y"
   run_setup "$INPUT"
   assert_eq "$SETUP_RC" "1" || return 1
   assert_json_eq "$OPENC" '.original' "marker" || return 1
@@ -164,7 +165,7 @@ test_unknown_flag() {
 test_cancel_before_apply() {
   reset_sandbox
   OPENC="$HOME/.config/opencode/opencode.json"
-  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "1" "n"
+  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "1" "$KEY" "n"
   run_setup "$INPUT"
   assert_eq "$SETUP_RC" "1" || return 1
   assert_contains "$(cat "$SETUP_ERR")" "Cancelled by user" || return 1
@@ -180,7 +181,7 @@ test_openclaw_e2e() {
   log=$(mktemp "${TMPDIR:-/tmp}/biblos-clilog.XXXXXX")
   bin=$(make_fake_cli openclaw "$log")
   export PATH="$bin:$PATH"
-  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "2" "y"
+  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "2" "$KEY" "y"
   run_setup "$INPUT"
   assert_eq "$SETUP_RC" "0" || return 1
   assert_json_eq "$OPENCLAW" '.mcp.servers.biblos.type' "streamable-http" || return 1
@@ -192,7 +193,7 @@ test_claude_e2e_with_cli() {
   log=$(mktemp "${TMPDIR:-/tmp}/biblos-clilog.XXXXXX")
   bin=$(make_fake_cli claude "$log")
   export PATH="$bin:$PATH"
-  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "3" "y"
+  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "3" "$KEY" "y"
   run_setup "$INPUT"
   assert_eq "$SETUP_RC" "0" || return 1
   assert_contains "$(cat "$log")" "mcp add --transport http biblos" || return 1
@@ -205,7 +206,7 @@ test_claude_e2e_without_cli() {
   make_toolbox "$tb" # complete toolbox minus the claude CLI
   oldpath="$PATH"
   export PATH="$tb"
-  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "3" "y"
+  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "3" "$KEY" "y"
   run_setup "$INPUT"
   local rc="$SETUP_RC"
   export PATH="$oldpath"
@@ -220,7 +221,7 @@ test_idempotency_e2e() {
   OPENC="$HOME/.config/opencode/opencode.json"
   mkdir -p "$(dirname "$OPENC")"
   echo '{"editor":{"theme":"dark"}}' > "$OPENC"
-  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "1" "y"
+  write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "1" "$KEY" "y"
   run_setup "$INPUT"
   assert_eq "$SETUP_RC" "0" || return 1
   run_setup "$INPUT"
@@ -258,7 +259,7 @@ test_register_failure_warns_exit0() {
   OPENC="$HOME/.config/opencode/opencode.json"
   : > "$MOCK_LOG"
   local url="http://127.0.0.1:$MOCK_PORT/register-fail"
-  write_input "$url" "$NAME" "1" "y"
+  write_input "$url" "$NAME" "1" "$KEY" "y"
   run_setup "$INPUT"
   assert_eq "$SETUP_RC" "0" || return 1
   # smoke test passed against /register-fail (initialize -> 200), config written
@@ -277,7 +278,7 @@ if [[ "$HAVE_PYTHON" -eq 1 ]]; then
     exit 1
   }
 
-  t "full happy path: opencode flow, smoke+register, backup kept, no key leakage" test_happy_path
+  t "full happy path: opencode flow, smoke+register, backup kept, key never echoed" test_happy_path
   t "smoke test failure (HTTP 401) triggers automatic rollback + failure summary" test_rollback_on_401
   t "unreachable server triggers rollback with the pre-write config restored + failure summary" test_rollback_unreachable_server
   t "cancel at the confirmation prompt exits 1 without writing config" test_cancel_before_apply

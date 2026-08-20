@@ -12,6 +12,9 @@ source "$SCRIPT_DIR/helpers.sh"
 
 ADAPTER="$TOOLS_DIR/adapters/opencode.sh"
 URL="http://localhost:8199/mcp"
+# Origin header is the scheme://host base, NEVER the /mcp path (matches
+# BIBLOS_ALLOWED_ORIGINS exact match on the server).
+ORIGIN="http://localhost:8199"
 NAME="test-agent-01"
 KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
@@ -28,7 +31,7 @@ test_wc_creates_structure() {
   assert_json_eq "$CONFIG" '.mcp.biblos.enabled' "true" || return 1
   assert_json_eq "$CONFIG" '.mcp.biblos.oauth' "false" || return 1
   assert_json_eq "$CONFIG" '.mcp.biblos.headers.Authorization' "Bearer $KEY" || return 1
-  assert_json_eq "$CONFIG" '.mcp.biblos.headers.Origin' "$URL" || return 1
+  assert_json_eq "$CONFIG" '.mcp.biblos.headers.Origin' "$ORIGIN" || return 1
   assert_json_eq "$CONFIG" '.mcp.biblos.headers["X-Biblos-Agent"]' "$NAME" || return 1
 }
 

@@ -104,6 +104,14 @@ test_generate_key_openssl_missing() {
   assert_contains "$out" "openssl rand failed" || return 1
 }
 
+test_prompt_secret_reads_stdin() {
+  local out
+  # The value is read from stdin without echo; only the value itself is
+  # printed to stdout (the prompt goes to stderr, discarded here).
+  out=$(printf '%s\n' "$KEY" | lib_env "$LIB_DIR/tui.sh" prompt_secret "Enter key:" 2>/dev/null)
+  assert_eq "$out" "$KEY" || return 1
+}
+
 # --- Missing dependencies (REQ-014) -------------------------------------------
 
 test_check_deps_missing() {
@@ -267,7 +275,7 @@ test_nfr_perf_full_flow_under_10s() {
   start_mock_server "$(mktemp "${TMPDIR:-/tmp}/biblos-mocklog.XXXXXX")"
   local input start end ms
   input=$(mktemp "${TMPDIR:-/tmp}/biblos-input.XXXXXX")
-  printf '%s\n' "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "1" "y" > "$input"
+  printf '%s\n' "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "1" "$KEY" "y" > "$input"
   start=$(date +%s%N)
   run_setup "$input"
   end=$(date +%s%N)
@@ -285,9 +293,14 @@ test_nfr_logging_and_key_leakage() {
     return 0
   fi
   start_mock_server "$(mktemp "${TMPDIR:-/tmp}/biblos-mocklog.XXXXXX")"
-  local input key
+  # Start from a clean slate: earlier tests in the shared sandbox already
+  # wrote a (key-carrying) config, which would legitimately end up in THIS
+  # run's backup. Remove prior config + backups so the only key occurrence is
+  # the one this run injects into the config header.
+  rm -f "$OPENC" "$OPENC".backup.* 2>/dev/null
+  local input backup
   input=$(mktemp "${TMPDIR:-/tmp}/biblos-input.XXXXXX")
-  printf '%s\n' "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "1" "y" > "$input"
+  printf '%s\n' "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "1" "$KEY" "y" > "$input"
   run_setup "$input"
   assert_eq "$SETUP_RC" "0" || return 1
 
@@ -296,14 +309,14 @@ test_nfr_logging_and_key_leakage() {
   logs=$(grep -cE '^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\] ' "$SETUP_ERR")
   [[ "$logs" -gt 0 ]] || { fail "no timestamped log lines on stderr"; return 1; }
 
-  # REQ-013: the key appears exactly once on stderr (one-time display),
-  # never on stdout, and never in the backup file.
-  key=$(grep -oE '[0-9a-f]{64}' "$SETUP_ERR" | head -1)
-  assert_eq "$(grep -o "$key" "$SETUP_ERR" | wc -l)" "1" || return 1
-  assert_eq "$(grep -c "$key" "$SETUP_OUT")" "0" || return 1
-  local backup
+  # REQ-013: the shared key is entered with NO echo (prompt_secret), so it
+  # must never appear on stderr, stdout, or in any backup file. It appears
+  # exactly once: inside the config's sanctioned Authorization header.
+  assert_eq "$(grep -c "$KEY" "$SETUP_ERR")" "0" || return 1
+  assert_eq "$(grep -c "$KEY" "$SETUP_OUT")" "0" || return 1
   backup=$(ls "$OPENC".backup.* 2>/dev/null | head -1)
-  assert_eq "$(grep -c "$key" "$backup")" "0" || return 1
+  assert_eq "$(grep -c "$KEY" "$backup")" "0" || return 1
+  assert_eq "$(grep -c "$KEY" "$OPENC")" "1" || return 1
   stop_mock_server
 }
 
@@ -367,6 +380,7 @@ t "validate_agent_name rejects empty/short/long/space/underscore/dot names" test
 t "generate_key emits a 64-hex-char key" test_generate_key_format
 t "generate_key produces distinct keys per call" test_generate_key_random
 t "generate_key fails with a clear error when openssl is missing" test_generate_key_openssl_missing
+t "prompt_secret reads a value from stdin without echoing it" test_prompt_secret_reads_stdin
 t "check_deps reports missing dependencies with install hints and exits 1" test_check_deps_missing
 t "concurrent same-second backups get distinct filenames" test_backup_names_distinct_same_second
 t "backups are tightened to 600 permissions" test_backup_permissions_600
@@ -385,7 +399,7 @@ t "NFR-001: bash >= 4" test_nfr_bash_version
 t "NFR-001: all shell scripts pass bash -n syntax check" test_nfr_syntax_check
 t "NFR-002: --help completes in under 10s" test_nfr_perf_help_under_10s
 t "NFR-002: full flow completes in under 10s" test_nfr_perf_full_flow_under_10s
-t "NFR-003: logs carry timestamps; key leaks nowhere except the one-time display" test_nfr_logging_and_key_leakage
+t "NFR-003: logs carry timestamps; key leaks nowhere (no-echo prompt) except the config header" test_nfr_logging_and_key_leakage
 t "prompt_choice returns the Exit sentinel for selection 4 (REQ-003)" test_prompt_choice_exit_option
 t "prompt_choice rejects 0/5/abc and re-prompts until a valid choice (S5)" test_prompt_choice_invalid_reprompts
 t "prompt_choice reports invalid input with a clear error message (S5)" test_prompt_choice_invalid_error_message

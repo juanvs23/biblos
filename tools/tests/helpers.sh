@@ -201,7 +201,7 @@ make_toolbox() {
   local dir="$1"
   mkdir -p "$dir"
   local t
-  for t in bash date dirname basename mkdir cp mv rm chmod touch cat jq openssl curl stat find head ls grep sed awk sort tail printf mktemp seq; do
+  for t in bash date dirname basename mkdir cp mv rm chmod touch cat jq openssl curl stat find head ls grep sed awk sort tail tr printf mktemp seq; do
     if command -v "$t" &>/dev/null; then
       ln -sf "$(command -v "$t")" "$dir/$t"
     fi
