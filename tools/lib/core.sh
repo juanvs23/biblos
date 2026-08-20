@@ -167,6 +167,14 @@ smoke_test_curl() {
   local key="$3"
   local adapter_name="${4:-}"
 
+  # A valid MCP `initialize` request MUST carry `params.protocolVersion`,
+  # `params.capabilities`, and `params.clientInfo`. The Biblos server's SDK
+  # (1.30.0) rejects an initialize missing `params` with HTTP 400; the test
+  # mock does not, which is why this regressed silently against the real server.
+  local init_body
+  init_body=$(jq -n --arg name "$name" \
+    '{jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2025-11-25",capabilities:{},clientInfo:{name:$name,version:"biblos-setup"}}}')
+
   # Step 1: Check HTTP status code (body discarded via -o /dev/null)
   local status_code
   status_code=$(curl --silent --show-error --max-time 30 --write-out "%{http_code}" -o /dev/null \
@@ -176,7 +184,7 @@ smoke_test_curl() {
     -H "Authorization: Bearer $key" \
     -H "Origin: $(origin_of "$url")" \
     -H "X-Biblos-Agent: $name" \
-    -d '{"jsonrpc":"2.0","method":"initialize","id":1}')
+    -d "$init_body")
 
   if [[ "$status_code" != "200" && "$status_code" != "202" ]]; then
     local msg="Smoke test failed: HTTP $status_code"
@@ -196,7 +204,7 @@ smoke_test_curl() {
     -H "Authorization: Bearer $key" \
     -H "Origin: $(origin_of "$url")" \
     -H "X-Biblos-Agent: $name" \
-    -d '{"jsonrpc":"2.0","method":"initialize","id":1}')
+    -d "$init_body")
 
   if ! echo "$response" | jq empty 2>/dev/null; then
     local msg="Smoke test: response is not valid JSON"

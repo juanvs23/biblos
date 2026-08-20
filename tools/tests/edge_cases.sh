@@ -202,7 +202,7 @@ test_empty_existing_config_initialized_openclaw() {
   adapter_env "$TOOLS_DIR/adapters/openclaw.sh" write_config "$URL" "$NAME" "$KEY"
   local rc=$?
   assert_eq "$rc" "0" || return 1
-  assert_json_eq "$OPENCLAW" '.mcp.servers.biblos.type' "streamable-http" || return 1
+  assert_json_eq "$OPENCLAW" '.mcp.servers.biblos.transport' "streamable-http" || return 1
   assert_file_absent "${OPENCLAW}.tmp" || return 1
 }
 

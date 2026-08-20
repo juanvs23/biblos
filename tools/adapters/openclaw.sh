@@ -53,9 +53,11 @@ write_config() {
     chmod 600 "$OPENCLAW_CONFIG"
   fi
 
-  # Write Biblos entry via jq (atomic, preserves existing entries)
-  # Note: Authorization header is injected by OpenClaw runtime via secret store,
-  # not written inline. The script only writes the server config block.
+  # Write Biblos entry via jq (atomic, preserves existing entries).
+  # OpenClaw 2026.7 expects `transport` (not the legacy `type`), and the
+  # Authorization Bearer key is referenced via env-var substitution
+  # `${BIBLOS_API_KEY}`, which OpenClaw resolves from its environment (global
+  # `~/.openclaw/.env` or `env.vars`). The key value is stored separately below.
   # `if !` form: under `set -e` the old `if [[ $? -ne 0 ]]` guard was dead
   # code — a failing jq aborted the function before cleanup could run.
   local tmp_file="${OPENCLAW_CONFIG}.tmp"
@@ -63,12 +65,13 @@ write_config() {
      --arg name "$name" \
      --arg origin "$(origin_of "$url")" \
      '.mcp.servers.biblos = {
-       type: "streamable-http",
+       transport: "streamable-http",
        url: $url,
        enabled: true,
        headers: {
          "Origin": $origin,
-         "X-Biblos-Agent": $name
+         "X-Biblos-Agent": $name,
+         "Authorization": "Bearer ${BIBLOS_API_KEY}"
        }
      }' "$OPENCLAW_CONFIG" > "$tmp_file"; then
     log_error "jq failed to write OpenClaw config."
@@ -79,16 +82,21 @@ write_config() {
   mv "$tmp_file" "$OPENCLAW_CONFIG"
   chmod 600 "$OPENCLAW_CONFIG"
 
-  # Inject API key into OpenClaw's secret store (REQ-006)
-  if command -v openclaw &>/dev/null; then
-    openclaw secrets set BIBLOS_API_KEY "$key" 2>/dev/null || {
-      log_warn "Failed to set BIBLOS_API_KEY in OpenClaw secret store."
-      log_warn "You may need to set it manually: openclaw secrets set BIBLOS_API_KEY <key>"
-    }
-  else
-    log_warn "openclaw CLI not found — skipping secret store injection."
-    log_warn "Set BIBLOS_API_KEY manually or install openclaw CLI."
+  # Store BIBLOS_API_KEY in OpenClaw's global env file so `${BIBLOS_API_KEY}`
+  # in the MCP header resolves. OpenClaw 2026.7 has no `openclaw secrets set`;
+  # the supported path for an MCP header secret is env-var substitution.
+  local env_file="$HOME/.openclaw/.env"
+  if [[ ! -f "$env_file" ]]; then
+    touch "$env_file"
+    chmod 600 "$env_file"
   fi
+  # Remove any existing BIBLOS_API_KEY line, then append the fresh value.
+  if grep -q '^BIBLOS_API_KEY=' "$env_file" 2>/dev/null; then
+    grep -v '^BIBLOS_API_KEY=' "$env_file" > "$env_file.tmp" 2>/dev/null || true
+    mv "$env_file.tmp" "$env_file"
+  fi
+  printf 'BIBLOS_API_KEY=%s\n' "$key" >> "$env_file"
+  chmod 600 "$env_file"
 
   log_info "OpenClaw config written to $OPENCLAW_CONFIG"
   return 0

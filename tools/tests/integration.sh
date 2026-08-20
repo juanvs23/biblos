@@ -59,9 +59,11 @@ test_happy_path() {
   assert_jsonl_eq "$MOCK_LOG" '[.[] | select(.body | contains("initialize"))][0].headers["X-Biblos-Agent"]' "$NAME" || return 1
   assert_jsonl_eq "$MOCK_LOG" '[.[] | select(.body | contains("initialize"))][0].headers.Origin' "$origin" || return 1
 
-  # registration payload reached the server (REQ-008)
+  # registration payload reached the server (REQ-008) — identified by the
+  # `tools/call` JSON-RPC method (the MCP `initialize` handshake also carries
+  # `capabilities`, so it must not be the discriminator).
   local reg_body auth
-  reg_body=$(jq -sr '[.[] | select(.body | contains("capabilities"))][0].body' "$MOCK_LOG")
+  reg_body=$(jq -sr '[.[] | select(.body | contains("tools/call"))][0].body' "$MOCK_LOG")
   assert_contains "$reg_body" '"name": "'$NAME'"' || return 1
   assert_contains "$reg_body" '"type": "opencode"' || return 1
   auth=$(jq -sr '[.[] | select(.body | contains("initialize"))][0].headers.Authorization' "$MOCK_LOG")
@@ -184,8 +186,8 @@ test_openclaw_e2e() {
   write_input "http://127.0.0.1:$MOCK_PORT/mcp" "$NAME" "2" "$KEY" "y"
   run_setup "$INPUT"
   assert_eq "$SETUP_RC" "0" || return 1
-  assert_json_eq "$OPENCLAW" '.mcp.servers.biblos.type' "streamable-http" || return 1
-  assert_contains "$(cat "$log")" "secrets set BIBLOS_API_KEY" || return 1
+  assert_json_eq "$OPENCLAW" '.mcp.servers.biblos.transport' "streamable-http" || return 1
+  assert_contains "$(cat "$HOME/.openclaw/.env")" "BIBLOS_API_KEY=$KEY" || return 1
 }
 
 test_claude_e2e_with_cli() {

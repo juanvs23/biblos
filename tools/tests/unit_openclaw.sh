@@ -26,15 +26,18 @@ CONFIG="$HOME/.openclaw/openclaw.json"
 test_wc_creates_structure() {
   adapter_env "$ADAPTER" write_config "$URL" "$NAME" "$KEY" || return 1
   assert_file_exists "$CONFIG" || return 1
-  assert_json_eq "$CONFIG" '.mcp.servers.biblos.type' "streamable-http" || return 1
+  assert_json_eq "$CONFIG" '.mcp.servers.biblos.transport' "streamable-http" || return 1
   assert_json_eq "$CONFIG" '.mcp.servers.biblos.url' "$URL" || return 1
   assert_json_eq "$CONFIG" '.mcp.servers.biblos.enabled' "true" || return 1
   assert_json_eq "$CONFIG" '.mcp.servers.biblos.headers.Origin' "$ORIGIN" || return 1
   assert_json_eq "$CONFIG" '.mcp.servers.biblos.headers["X-Biblos-Agent"]' "$NAME" || return 1
-  # REQ-006: Authorization comes from the secret store, never inline
-  assert_json_true "$CONFIG" '.mcp.servers.biblos.headers | has("Authorization") | not' || return 1
+  # REQ-006: Authorization is a Bearer reference to BIBLOS_API_KEY (env-var
+  # substitution), never the raw key literal inline.
+  assert_json_eq "$CONFIG" '.mcp.servers.biblos.headers.Authorization' "Bearer \${BIBLOS_API_KEY}" || return 1
   # REQ-013: the raw key must never appear in the config file
   assert_not_contains "$(cat "$CONFIG")" "$KEY" || return 1
+  # REQ-006/017: the key value lands in OpenClaw's global env file for resolution.
+  assert_contains "$(cat "$HOME/.openclaw/.env")" "BIBLOS_API_KEY=$KEY" || return 1
 }
 
 test_wc_preserves_entries() {
@@ -45,7 +48,7 @@ JSON
   adapter_env "$ADAPTER" write_config "$URL" "$NAME" "$KEY" || return 1
   assert_json_eq "$CONFIG" '.telemetry' "false" || return 1
   assert_json_eq "$CONFIG" '.mcp.servers.other.command' "x" || return 1
-  assert_json_eq "$CONFIG" '.mcp.servers.biblos.type' "streamable-http" || return 1
+  assert_json_eq "$CONFIG" '.mcp.servers.biblos.transport' "streamable-http" || return 1
 }
 
 test_wc_idempotent() {
@@ -68,45 +71,34 @@ test_wc_corrupt_config_clean_error() {
   assert_file_absent "${CONFIG}.tmp" || return 1
 }
 
-# --- secret store injection (REQ-006, REQ-017) --------------------------------
+# --- env key injection (REQ-006, REQ-017) ------------------------------------
+# OpenClaw 2026.7 has no `openclaw secrets set`; the MCP Authorization header
+# references BIBLOS_API_KEY via env-var substitution, and the adapter stores the
+# value in OpenClaw's global env file (~/.openclaw/.env).
 
-test_wc_injects_secret_store() {
-  local log bin
-  log=$(mktemp "${TMPDIR:-/tmp}/biblos-clilog.XXXXXX")
-  bin=$(make_fake_cli openclaw "$log")
-  export PATH="$bin:$PATH"
+test_wc_injects_env_key() {
   mkdir -p "$(dirname "$CONFIG")"
   echo '{}' > "$CONFIG"
   adapter_env "$ADAPTER" write_config "$URL" "$NAME" "$KEY" || return 1
-  assert_contains "$(cat "$log")" "secrets set BIBLOS_API_KEY $KEY" || return 1
+  assert_contains "$(cat "$HOME/.openclaw/.env")" "BIBLOS_API_KEY=$KEY" || return 1
+  local mode
+  mode=$(stat -c %a "$HOME/.openclaw/.env")
+  assert_eq "$mode" "600" || return 1
 }
 
-test_wc_secret_store_failure_warns_but_succeeds() {
-  local log bin stub err rc
-  log=$(mktemp "${TMPDIR:-/tmp}/biblos-clilog.XXXXXX")
-  bin=$(make_fake_cli openclaw "$log")
-  stub="$bin/openclaw"
-  printf '#!/usr/bin/env bash\necho "$*" >> "%s"\nexit 1\n' "$log" > "$stub"
-  chmod +x "$stub"
-  export PATH="$bin:$PATH"
+test_wc_env_key_updates_in_place() {
   mkdir -p "$(dirname "$CONFIG")"
   echo '{}' > "$CONFIG"
-  err=$(adapter_env "$ADAPTER" write_config "$URL" "$NAME" "$KEY" 2>&1 >/dev/null)
-  rc=$?
-  assert_eq "$rc" "0" || return 1
-  assert_contains "$err" "Failed to set BIBLOS_API_KEY" || return 1
-}
-
-test_wc_absent_cli_warns_but_succeeds() {
-  local tb err rc
-  tb=$(mktemp -d)
-  make_toolbox "$tb" # no openclaw in the toolbox
-  mkdir -p "$(dirname "$CONFIG")"
-  echo '{}' > "$CONFIG"
-  err=$(adapter_env_path "$tb" "$ADAPTER" write_config "$URL" "$NAME" "$KEY" 2>&1 >/dev/null)
-  rc=$?
-  assert_eq "$rc" "0" || return 1
-  assert_contains "$err" "openclaw CLI not found" || return 1
+  # Pre-existing unrelated env line must survive; re-run must not duplicate.
+  mkdir -p "$(dirname "$HOME/.openclaw/.env")"
+  printf 'SOME_OTHER=keep\n' > "$HOME/.openclaw/.env"
+  adapter_env "$ADAPTER" write_config "$URL" "$NAME" "$KEY" || return 1
+  adapter_env "$ADAPTER" write_config "$URL" "$NAME" "$KEY" || return 1
+  local envfile="$HOME/.openclaw/.env"
+  assert_contains "$(cat "$envfile")" "SOME_OTHER=keep" || return 1
+  local n
+  n=$(grep -c '^BIBLOS_API_KEY=' "$envfile")
+  assert_eq "$n" "1" || return 1
 }
 
 test_wc_no_key_in_logs() {
@@ -180,9 +172,8 @@ t "write_config creates ~/.openclaw/openclaw.json with the REQ-006 structure (no
 t "write_config preserves existing non-Biblos entries" test_wc_preserves_entries
 t "write_config is idempotent (single biblos entry after re-run)" test_wc_idempotent
 t "write_config on corrupt JSON fails cleanly, file untouched, no .tmp leftover" test_wc_corrupt_config_clean_error
-t "write_config injects the key via openclaw secrets set BIBLOS_API_KEY" test_wc_injects_secret_store
-t "secret store failure warns but does not fail the adapter" test_wc_secret_store_failure_warns_but_succeeds
-t "absent openclaw CLI warns and still succeeds" test_wc_absent_cli_warns_but_succeeds
+t "write_config stores BIBLOS_API_KEY in the env file with 600 perms" test_wc_injects_env_key
+t "write_config updates the env key in place without duplicating or losing other lines" test_wc_env_key_updates_in_place
 t "write_config never logs the API key" test_wc_no_key_in_logs
 t "backup_config creates a timestamped backup with 600 permissions" test_backup_creates_timestamped_600
 t "restore_config restores the latest backup" test_restore_restores_latest_backup

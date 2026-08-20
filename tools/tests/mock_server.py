@@ -8,7 +8,7 @@ Smoke-test / registration behaviour is driven by URL path prefix:
   /unauthorized  -> 401 + JSON error
   /invalid       -> 200 + non-JSON body
   /empty         -> 200 + empty body
-  /register-fail -> register requests (body contains "capabilities") get 500;
+  /register-fail -> register requests (body contains "tools/call") get 500;
                     other requests (e.g. the smoke-test initialize call) get
                     200 + valid JSON-RPC response
   anything else  -> 200 + valid JSON-RPC response (e.g. /mcp)
@@ -58,11 +58,13 @@ class Handler(BaseHTTPRequestHandler):
             status, payload = 200, "this is not json"
         elif self.path.startswith("/empty"):
             status, payload = 200, ""
-        elif self.path.startswith("/register-fail") and "capabilities" in body:
+        elif self.path.startswith("/register-fail") and "tools/call" in body:
             # Registration-failure simulation (REQ-008/010 failure paths):
-            # register_agent posts a body containing "capabilities" to the
-            # same endpoint the smoke test uses. Keep the smoke test passing
-            # (200) while registration itself fails (500).
+            # register_agent posts a `tools/call` JSON-RPC request to the
+            # same endpoint the smoke test uses. Distinguish it from the MCP
+            # `initialize` handshake (which also carries `capabilities`) by
+            # the JSON-RPC `method`. Keep the smoke test passing (200) while
+            # registration itself fails (500).
             status, payload = 500, {
                 "jsonrpc": "2.0",
                 "error": {"code": -32000, "message": "registration rejected"},
