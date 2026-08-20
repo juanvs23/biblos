@@ -30,10 +30,10 @@
 - [x] T014: Adapter registry and dispatch (`setup-biblos.sh` — `get_adapter_file()`)
 - [x] T015: End-to-end smoke test wiring (integration of adapter flow, rollback, summary)
 
-## Phase 3: Testing & Polish (T016-T020) — Work Unit 3
+## Phase 3: Testing & Polish (T016-T020) — Work Unit 3 ✅ COMPLETE
 
-- [ ] T016: Unit test — OpenCode adapter
-- [ ] T017: Unit test — OpenClaw adapter
-- [ ] T018: Unit test — Claude Code adapter
-- [ ] T019: Integration tests (full flow, rollback, edge cases)
-- [ ] T020: Edge cases and NFR validation
+- [x] T016: Unit test — OpenCode adapter (`tools/tests/unit_opencode.sh`)
+- [x] T017: Unit test — OpenClaw adapter (`tools/tests/unit_openclaw.sh`)
+- [x] T018: Unit test — Claude Code adapter (`tools/tests/unit_claude_code.sh`)
+- [x] T019: Integration tests (full flow, rollback, edge cases) (`tools/tests/integration.sh`)
+- [x] T020: Edge cases and NFR validation (`tools/tests/edge_cases.sh`)

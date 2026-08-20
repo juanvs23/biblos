@@ -17,3 +17,8 @@ coverage/
 
 # Local opencode/agent config (never public)
 .atl/
+
+# Setup tool transient artifacts (proposal: backups never committed)
+tools/.tmp_setup
+tools/**/*.backup.*
+tools/tests/__pycache__/
