@@ -15,20 +15,38 @@ set -euo pipefail
 # Tiebreaker: microseconds within same second
 # ---------------------------------------------------------------------------
 
+# Portable backup timestamp (NFR-001). The YYYYMMDD-HHMMSS base format is
+# POSIX (GNU and BSD/macOS). GNU-only %N nanoseconds are appended when the
+# platform supports them as a same-second tiebreaker (design edge case #3);
+# on BSD/macOS the epoch seconds fallback keeps names unique across runs.
+backup_timestamp() {
+  local base nanos
+  base=$(date '+%Y%m%d-%H%M%S')
+  if nanos=$(date +%N 2>/dev/null) && [[ "$nanos" =~ ^[0-9]+$ ]]; then
+    echo "${base}-${nanos}"
+  else
+    echo "${base}-$(date +%s)"
+  fi
+}
+
 create_backup() {
   local config_file="$1"
   local backup_path
 
+  # The config directory may not exist yet on first-time setup
+  # (write_config creates it later) — the backup must still be creatable.
+  mkdir -p "$(dirname "$config_file")"
+
   if [[ ! -f "$config_file" ]]; then
     # Nothing to back up — create empty backup for tracking
-    backup_path="${config_file}.backup.$(date '+%Y%m%d-%H%M%S%N')"
+    backup_path="${config_file}.backup.$(backup_timestamp)"
     touch "$backup_path"
     chmod 600 "$backup_path"
     echo "$backup_path"
     return 0
   fi
 
-  backup_path="${config_file}.backup.$(date '+%Y%m%d-%H%M%S%N')"
+  backup_path="${config_file}.backup.$(backup_timestamp)"
   cp "$config_file" "$backup_path"
   chmod 600 "$backup_path"
   echo "$backup_path"
@@ -53,8 +71,10 @@ validate_backup() {
     return 1
   fi
 
-  # 3. For JSON configs: validate with jq
-  if [[ "$backup_path" == *.json ]]; then
+  # 3. For JSON configs: validate with jq.
+  #    Backups of JSON configs are named `<cfg>.json.backup.<ts>` — match both
+  #    that canonical pattern and a plain `.json` file.
+  if [[ "$backup_path" == *.json || "$backup_path" == *.json.backup.* ]]; then
     if ! jq empty "$backup_path" 2>/dev/null; then
       log_error "Backup file is not valid JSON: $backup_path"
       return 1

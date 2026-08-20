@@ -67,14 +67,19 @@ register_agent() {
   local url="$1" name="$2" type="$3" key="$4"
 
   local status_code
-  status_code=$(curl --silent --show-error --max-time 30 --write-out "%{http_code}" \
+  # `|| status_code="000"`: when the server is unreachable curl exits non-zero
+  # (e.g. connection refused) and would trip `set -e`; the write-out still
+  # yields "000" in that case, so fall back explicitly and keep the
+  # best-effort contract (warn + continue, never block).
+  status_code=$(curl --silent --show-error --max-time 30 --write-out "%{http_code}" -o /dev/null \
     -X POST "$url" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $key" \
     -H "Origin: $url" \
     -H "X-Biblos-Agent: $name" \
     -d "$(jq -n --arg n "$name" --arg t "$type" \
-       '{name:$n, type:$t, capabilities:["memory","graph","bus"]}')")
+       '{name:$n, type:$t, capabilities:["memory","graph","bus"]}')") \
+    || status_code="000"
 
   if [[ "$status_code" == "201" || "$status_code" == "200" ]]; then
     log_info "Agent '$name' registered on server."

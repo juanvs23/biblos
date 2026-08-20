@@ -151,6 +151,40 @@ restore_mode() {
 }
 
 # ---------------------------------------------------------------------------
+# Failure summary (REQ-018) — printed on the failure path so the user always
+# sees what was attempted, whether a rollback happened, and how to restore
+# manually. Mirrors the success summary's stdout channel.
+# Args: <url> <name> <type> <config_file> <backup_path> <rollback_status>
+#       rollback_status: performed | failed | none
+# ---------------------------------------------------------------------------
+
+show_failure_summary() {
+  local url="$1" name="$2" type="$3" config_file="$4" backup_path="$5" rollback_status="$6"
+  echo ""
+  echo "--- Setup Failed ---"
+  echo "❌ Configuration for '$name' ($type) could not be completed."
+  echo "   Server: $url"
+  case "$rollback_status" in
+    performed)
+      echo "   Rollback: performed — the previous configuration was restored."
+      ;;
+    failed)
+      echo "   Rollback: FAILED — the previous configuration could NOT be restored."
+      ;;
+    *)
+      echo "   Rollback: not applicable (no verified configuration was written)."
+      ;;
+  esac
+  if [[ -n "$backup_path" ]]; then
+    echo "   Backup:  $backup_path"
+    if [[ -n "$config_file" ]]; then
+      echo "   Restore: $(basename "$0") --restore $config_file $backup_path"
+    fi
+  fi
+  echo ""
+}
+
+# ---------------------------------------------------------------------------
 # Main flow
 # ---------------------------------------------------------------------------
 
@@ -216,7 +250,15 @@ main() {
   # Step 3: Agent type selection (REQ-003)
   echo "--- Step 3 of 7: Agent Type ---"
   local agent_type
-  agent_type=$(prompt_choice "Select agent type:" "${SUPPORTED_AGENTS[@]}")
+  agent_type=$(prompt_choice "Select agent type:" "${SUPPORTED_AGENTS[@]}" "Exit")
+
+  # REQ-003: option 4=Exit leaves the tool gracefully (exit 0) before any
+  # configuration is written or any key is generated.
+  if [[ "$agent_type" == "Exit" ]]; then
+    log_info "Exiting. No changes were made."
+    exit 0
+  fi
+
   log_info "Agent type: $agent_type"
   echo ""
 
@@ -276,6 +318,7 @@ main() {
     log_info "Writing configuration..."
     if ! write_config "$url" "$agent_name" "$api_key"; then
       log_error "❌ Failed to write config."
+      show_failure_summary "$url" "$agent_name" "$agent_type" "$config_file" "$backup_path" "none"
       exit $EXIT_CONFIG_ERROR
     fi
     log_info "✅ Config written successfully."
@@ -294,8 +337,10 @@ main() {
       if restore_backup "$config_file" "$backup_path"; then
         rollback_occurred="yes"
         log_info "Restored from $backup_path"
+        show_failure_summary "$url" "$agent_name" "$agent_type" "$config_file" "$backup_path" "performed"
       else
         log_error "Critical: rollback also failed!"
+        show_failure_summary "$url" "$agent_name" "$agent_type" "$config_file" "$backup_path" "failed"
       fi
       exit $EXIT_ROLLBACK
     fi
@@ -304,6 +349,7 @@ main() {
     log_info "Writing configuration via CLI..."
     if ! write_config "$url" "$agent_name" "$api_key"; then
       log_error "❌ Failed to write config."
+      show_failure_summary "$url" "$agent_name" "$agent_type" "" "" "none"
       exit $EXIT_CONFIG_ERROR
     fi
     log_info "✅ Config written successfully."
@@ -318,6 +364,7 @@ main() {
       register_agent "$url" "$agent_name" "$agent_type" "$api_key"
     else
       log_error "❌ Smoke test failed."
+      show_failure_summary "$url" "$agent_name" "$agent_type" "" "" "none"
       exit $EXIT_NETWORK_ERROR
     fi
   fi

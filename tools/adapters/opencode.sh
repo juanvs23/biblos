@@ -20,9 +20,11 @@ OPENCODE_CONFIG="$HOME/.config/opencode/opencode.json"
 # ---------------------------------------------------------------------------
 
 backup_config() {
+  mkdir -p "$(dirname "$OPENCODE_CONFIG")"
+
   if [[ ! -f "$OPENCODE_CONFIG" ]]; then
     # Create empty backup for tracking
-    local backup_path="${OPENCODE_CONFIG}.backup.$(date '+%Y%m%d-%H%M%S%N')"
+    local backup_path="${OPENCODE_CONFIG}.backup.$(backup_timestamp)"
     touch "$backup_path"
     chmod 600 "$backup_path"
     echo "$backup_path"
@@ -46,15 +48,19 @@ write_config() {
   # Ensure config directory exists
   mkdir -p "$(dirname "$OPENCODE_CONFIG")"
 
-  # Create empty config if it doesn't exist
-  if [[ ! -f "$OPENCODE_CONFIG" ]]; then
+  # Create empty config if it doesn't exist or is empty (REQ-005:
+  # "creates file if it does not exist" — an empty file has no content
+  # to preserve, so initialize it with the default empty JSON).
+  if [[ ! -f "$OPENCODE_CONFIG" || ! -s "$OPENCODE_CONFIG" ]]; then
     echo '{}' > "$OPENCODE_CONFIG"
     chmod 600 "$OPENCODE_CONFIG"
   fi
 
   # Write Biblos entry via jq (atomic, preserves existing entries)
+  # `if !` form: under `set -e` the old `if [[ $? -ne 0 ]]` guard was dead
+  # code — a failing jq aborted the function before cleanup could run.
   local tmp_file="${OPENCODE_CONFIG}.tmp"
-  jq --arg url "$url" \
+  if ! jq --arg url "$url" \
      --arg key "$key" \
      --arg name "$name" \
      '.mcp.biblos = {
@@ -67,9 +73,7 @@ write_config() {
          "Origin": $url,
          "X-Biblos-Agent": $name
        }
-     }' "$OPENCODE_CONFIG" > "$tmp_file"
-
-  if [[ $? -ne 0 ]]; then
+     }' "$OPENCODE_CONFIG" > "$tmp_file"; then
     log_error "jq failed to write OpenCode config."
     rm -f "$tmp_file"
     return 1

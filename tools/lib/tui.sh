@@ -42,12 +42,14 @@ prompt_choice() {
   local choices=("$@")
   local result
 
-  echo ""
-  echo "$prompt_text"
+  # Banner/list go to stderr (NFR-003): the ONLY stdout output is the
+  # selected value, so callers can capture it via $(...) cleanly.
+  echo "" >&2
+  echo "$prompt_text" >&2
   for i in "${!choices[@]}"; do
-    echo "  $((i + 1)). ${choices[$i]}"
+    echo "  $((i + 1)). ${choices[$i]}" >&2
   done
-  echo ""
+  echo "" >&2
 
   while true; do
     local input

@@ -20,8 +20,10 @@ OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
 # ---------------------------------------------------------------------------
 
 backup_config() {
+  mkdir -p "$(dirname "$OPENCLAW_CONFIG")"
+
   if [[ ! -f "$OPENCLAW_CONFIG" ]]; then
-    local backup_path="${OPENCLAW_CONFIG}.backup.$(date '+%Y%m%d-%H%M%S%N')"
+    local backup_path="${OPENCLAW_CONFIG}.backup.$(backup_timestamp)"
     touch "$backup_path"
     chmod 600 "$backup_path"
     echo "$backup_path"
@@ -45,8 +47,8 @@ write_config() {
   # Ensure config directory exists
   mkdir -p "$(dirname "$OPENCLAW_CONFIG")"
 
-  # Create empty config if it doesn't exist
-  if [[ ! -f "$OPENCLAW_CONFIG" ]]; then
+  # Create empty config if it doesn't exist or is empty (REQ-006)
+  if [[ ! -f "$OPENCLAW_CONFIG" || ! -s "$OPENCLAW_CONFIG" ]]; then
     echo '{}' > "$OPENCLAW_CONFIG"
     chmod 600 "$OPENCLAW_CONFIG"
   fi
@@ -54,8 +56,10 @@ write_config() {
   # Write Biblos entry via jq (atomic, preserves existing entries)
   # Note: Authorization header is injected by OpenClaw runtime via secret store,
   # not written inline. The script only writes the server config block.
+  # `if !` form: under `set -e` the old `if [[ $? -ne 0 ]]` guard was dead
+  # code — a failing jq aborted the function before cleanup could run.
   local tmp_file="${OPENCLAW_CONFIG}.tmp"
-  jq --arg url "$url" \
+  if ! jq --arg url "$url" \
      --arg name "$name" \
      '.mcp.servers.biblos = {
        type: "streamable-http",
@@ -65,9 +69,7 @@ write_config() {
          "Origin": $url,
          "X-Biblos-Agent": $name
        }
-     }' "$OPENCLAW_CONFIG" > "$tmp_file"
-
-  if [[ $? -ne 0 ]]; then
+     }' "$OPENCLAW_CONFIG" > "$tmp_file"; then
     log_error "jq failed to write OpenClaw config."
     rm -f "$tmp_file"
     return 1
