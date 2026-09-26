@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Remote deploy script for biblos on coltmandev.dev.
-# Streamed to the VPS by GitHub Actions as root:
-#   ssh root@coltmandev.dev 'bash -s' < deploy/remote-deploy.sh
+# Streamed to the VPS by GitHub Actions as root (the connect address lives
+# in the DEPLOY_SSH_HOST secret; the public domain sits behind Cloudflare):
+#   ssh root@"$DEPLOY_SSH_HOST" 'bash -s' < deploy/remote-deploy.sh
 #
-# CRITICAL: /opt/biblos holds untracked runtime state (the .env with
-# BIBLOS_API_KEY and the SQLite DB). Never run `git clean` here;
+# CRITICAL: /opt/biblos holds untracked runtime state (the SQLite DB;
+# API keys live outside the repo at /etc/biblos/biblos.env, loaded by the
+# unit's EnvironmentFile). Never run `git clean` here;
 # fetch + reset --hard leaves untracked files in place.
 
 set -euo pipefail
