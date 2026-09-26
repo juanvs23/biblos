@@ -1,0 +1,25 @@
+# Continuous integration: typecheck, test, and build on every push and pull request.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      # E2E tests spawn the built server (dist/index.js): build must precede test.
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test
