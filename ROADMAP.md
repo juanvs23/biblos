@@ -43,6 +43,11 @@ CLI autoejecutable para conectar OpenCode, OpenClaw, Claude Code a Biblos self-h
 | Prueba local OpenCode | ✅ **COMPLETADA** — config escrita, smoke 200, agente `thin15` registrado en servidor (verificado DB) |
 | Prueba local OpenClaw | ✅ **COMPLETADA + DESINSTALADA** — MCP de Biblos instalado (14 tools, smoke PASS, agente `openclaw-local` registrado) y luego OpenClaw local desinstalado (npm -g + servicio user systemd) por decisión del usuario |
 
+### Cambios directos (fuera de SDD, 2026-09-26/27)
+
+- **CI GitHub Actions + auto-deploy al VPS** (2026-09-26, commits `3dc5e56` + `0835207`): pipeline push → tests → deploy (`.github/workflows/ci.yml` + `deploy.yml`, `deploy/remote-deploy.sh`).
+- **Eliminación de la capa de embeddings** (2026-09-26/27, commits `db4f642` + `ebae04e`): `search_documents` es ahora FTS5 puro (ranking bm25, sin campo `matchedBy`); sqlite-vec eliminado (better-sqlite3 es el único módulo nativo); migración de producción verificada. Suite: 115/115 tests.
+
 ## Siguientes pasos (orden)
 
 ### 1. Prueba local con OpenClaw — ✅ COMPLETADA y CERRADA (20 Ago 2026)
@@ -51,22 +56,22 @@ CLI autoejecutable para conectar OpenCode, OpenClaw, Claude Code a Biblos self-h
 
 ### 2. Post-archive (mejoras futuras, fuera de slice 1)
 - Activar integración real de clientes (OpenClaw mcp.servers.biblos, OpenCode mcp.biblos, Hermes Agent mcp_servers.biblos) — requiere definir Origin de cada cliente en `BIBLOS_ALLOWED_ORIGINS` y exponer por Apache `https://biblos.coltmandev.dev/mcp` (Streamable HTTP, ya implementado).
-- Ecosistema open-source: CI GitHub Actions, badges, CONTRIBUTING, `.github/` templates.
-- Ranking híbrido: calibrar peso con corpus real.
+- Ecosistema open-source: ✅ CI GitHub Actions + auto-deploy al VPS (2026-09-26, `.github/workflows/` + `deploy/remote-deploy.sh`); faltan badges, CONTRIBUTING, `.github/` templates.
+- Ranking FTS5: calibrar `BIBLOS_MIN_SCORE` con corpus real (opcional; la búsqueda híbrida fue eliminada con la capa de embeddings, 2026-09-27).
 - Graph: auto-relaciones (v2 — requiere LLM en servidor, decisión pendiente).
 - Reranker Qwen3 para búsquedas finas.
-- Convertir el router llama.cpp a systemd (hoy corre con nohup).
+- Convertir el router llama.cpp a systemd (hoy corre con nohup; ya no afecta a Biblos — solo los consumidores de chat).
 - Arreglar el MCP github de opencode (wrapper con el token falla: "Authentication Failed").
 
 ### 3. Evaluación opcional de agentes alternativos (16 Ago 2026)
 - **Conclusión**: NO migrar de OpenClaw. Opcional probar Hermes Agent en paralelo (vive en `~/.hermes/`, no toca `~/.openclaw/`) — Telegram o 2º número, `hermes claw migrate --dry-run` para vista previa. Pi descartado como asistente (es coding agent).
-- Si se prueba Hermes: apuntarlo a Ollama (`localhost:11434/v1`) u Ollama Cloud (misma key, `gemma4:31b-cloud`); NO emparejar su bridge Baileys al mismo número de OpenClaw; NO dejar que haga swap en el router 8085 que usa Biblos para embeddings.
+- Si se prueba Hermes: apuntarlo a Ollama (`localhost:11434/v1`) u Ollama Cloud (misma key, `gemma4:31b-cloud`); NO emparejar su bridge Baileys al mismo número de OpenClaw; NO dejar que haga swap en el router 8085 (sirve chat a los consumidores del VPS; Biblos ya no lo usa).
 
 ## Riesgos abiertos
 - **MongoDB 27017 expuesto** a internet (0.0.0.0) — de OTROS proyectos; no es nuestro para resolver, pero conviene que el usuario lo cierre.
 - **Origin de clientes CLI**: OpenCode/OpenClaw sin header Origin → 403 por defecto; allowlist explícita al activar clientes (`BIBLOS_ALLOWED_ORIGINS=https://biblos.coltmandev.dev` hoy).
 - **Cloudflare proxied**: el dominio está detrás del proxy (solo se ve IPv6 de Cloudflare); el A record debe apuntar al VPS para que el proxy reenvíe. Verificado funcionando (certbot OK vía challenge HTTP).
-- **Router llama.cpp no es systemd**: si el VPS reinicia, el router 8085 no levanta solo → el server biblos arranca pero save/search fallan hasta levantarlo.
+- **Router llama.cpp no es systemd** — RESUELTO para Biblos (2026-09-27): la capa de embeddings fue eliminada; save/search ya no dependen del router. El pendiente de systemd queda solo para los consumidores de chat (si el VPS reinicia, el router 8085 no levanta solo).
 - **FIFO del bus no determinista** si dos envíos comparten el mismo ms (tie-break UUID aleatorio) — aceptable según diseño.
 
 ## Comandos útiles
@@ -77,6 +82,6 @@ cd /mnt/1TB/IA/mcp/biblos && npx vitest run && npm run build
 ssh coltmandev.dev "systemctl status biblos --no-pager | head -5"
 # Smoke público
 curl -s -o /dev/null -w "%{http_code}\n" https://biblos.coltmandev.dev/mcp
-# Router VPS (ya corriendo)
+# Router VPS (chat — Biblos ya no lo usa)
 ssh coltmandev.dev "curl -s http://127.0.0.1:8085/health"
 ```

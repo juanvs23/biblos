@@ -4,12 +4,14 @@
 schema: spec-driven
 
 context: |
-  Project: biblos — multi-agent MCP server with documented vectorized memory,
-    knowledge graph, and an interconnection bus between agents
+  Project: biblos — multi-agent MCP server with documented keyword-searchable
+    memory (FTS5), knowledge graph, and an interconnection bus between agents
     (OpenClaw, OpenCode, Claude Code).
   Tech stack: TypeScript on Node.js v24.19.0 (npm 11.17.0); official MCP SDK.
-  Architecture: MCP server; llama.cpp router mode on the VPS — port 8085 serving
-    chat (Qwen3.5-4B) + embeddings (nomic-embed-text-v1.5).
+  Architecture: MCP server over Streamable HTTP; SQLite via better-sqlite3 with
+    FTS5 keyword search — no external model dependency. The llama.cpp router on
+    the VPS (port 8085, chat Qwen3.5-4B) serves other consumers; Biblos does
+    not use it.
   Status: new project, not a git repo yet, no package.json yet.
   Style: TypeScript-first; MCP protocol conventions; artifact language English.
 

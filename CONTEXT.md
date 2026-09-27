@@ -1,13 +1,13 @@
 # Biblos — Contexto del proyecto
 
-> Última actualización: 2026-08-20 (cierre de sesión)
+> Última actualización: 2026-09-27 (remoción capa de embeddings + pipeline CI/CD)
 
 ## Qué es Biblos
 
 Servidor **MCP multiagente** que corre en un VPS y sirve de **enlace entre agentes** (OpenClaw, OpenCode, Claude Code). No es un cerebro central: cada agente conserva su propio LLM y memoria local; Biblos es la **biblioteca común documentada** + **bus de interconexión**.
 
 Dos capacidades (slice 1, ambas):
-1. **Memoria documentada vectorizada**: guardar/leer/editar/borrar información de procesos y detalles. Cada recuerdo = documento **Markdown** + metadatos estructurados. Búsqueda híbrida (semántica + keyword).
+1. **Memoria documentada**: guardar/leer/editar/borrar información de procesos y detalles. Cada recuerdo = documento **Markdown** + metadatos estructurados. Búsqueda por palabra clave (FTS5 + ranking BM25).
 2. **Bus inter-agentes**: enviar/recibir peticiones entre agentes con cola persistente y verificación de identidad.
 
 ## Arquitectura
@@ -19,13 +19,12 @@ Agentes (OpenClaw=Gemma, OpenCode, Claude Code)
 Servidor MCP TS (127.0.0.1:8199, @modelcontextprotocol/sdk@1.30.0)
    ├─ 14 tools (memoria, grafo, bus, registro)
    ├─ Dominio: documents, graph, registry, bus
-   └─ SQLite /opt/biblos/biblos.db (better-sqlite3 + sqlite-vec 768d + FTS5)
-        └─ embeddings → llama.cpp router 127.0.0.1:8085 (nomic-embed-text-v1.5.Q8_0)
+   └─ SQLite /opt/biblos/biblos.db (better-sqlite3 + FTS5 — único módulo nativo)
 ```
 
 - **Persistencia**: SQLite embebido (DECISIÓN: Mongo descartado, en uso por otros proyectos).
-- **Embeddings**: nomic-embed-text-v1.5 (768d) vía llama.cpp router mode — validado en POC (similitud correcta: mismo tema 0.84, distinto 0.55).
-- **Orquestador chat**: qwen35-4b en el mismo router (no usado por el servidor en v1).
+- **Búsqueda**: FTS5 pura (keyword + ranking BM25) sobre contenido y tags — sin dependencia de modelos externos.
+- **Orquestador chat**: qwen35-4b en el router llama.cpp del VPS (no usado por Biblos).
 - **Identidad**: header `X-Biblos-Agent`; registro de agentes explícito y obligatorio; poll/respond verifican destinatario.
 - **Seguridad**: Bearer + Origin → 403 (spec MCP 2025-11-25).
 
@@ -34,13 +33,13 @@ Servidor MCP TS (127.0.0.1:8199, @modelcontextprotocol/sdk@1.30.0)
 | Decisión | Valor |
 |---|---|
 | OpenClaw | NO tocar su config — Gemma 31B + soul/memory, le encanta la interacción |
-| llama.cpp local | Descartado como cerebro de OpenClaw; sí es base de Biblos (router 8085) |
+| llama.cpp local | Descartado como cerebro de OpenClaw; ya NO es base de Biblos (embeddings removidos 2026-09-26) — el router 8085 queda para chat/otros consumidores |
 | Persistencia | SQLite, NO MongoDB |
 | Formato memoria | Markdown legible + metadatos en columnas |
 | Slice 1 | Memoria + bus juntos (todo) |
 | Entrega | 4 PRs encadenados, stacked-to-main, LOCAL (sin GitHub) |
 | Bus | Verificación de identidad del destinatario |
-| Búsqueda | Híbrida configurable, default 50/50 |
+| Búsqueda | FTS5 pura (keyword + BM25) — el usuario revirtió la decisión híbrida/embeddings el 2026-09-26 al eliminar la capa por fiabilidad del router |
 | Registro | Explícito obligatorio |
 | graph_render | Mermaid por defecto |
 
@@ -48,7 +47,7 @@ Servidor MCP TS (127.0.0.1:8199, @modelcontextprotocol/sdk@1.30.0)
 
 - El VPS del autor (acceso por SSH con la clave del usuario), Ubuntu 24.04, 6 vCPU, 11 GB RAM, 242 GB SSD, Docker.
 - **OpenClaw**: gateway 127.0.0.1:18789 (systemd, NO tocar gateway.auth).
-- **llama.cpp router**: 127.0.0.1:8085 (nohup; PENDIENTE: convertir a systemd) — modelos qwen35-4b (chat) y nomic-embed-text-v1.5.Q8_0 (embeddings). Log: /tmp/llama-router.log. Preset: /opt/models/router/presets.ini.
+- **llama.cpp router**: 127.0.0.1:8085 (nohup; PENDIENTE: convertir a systemd) — sirve chat (qwen35-4b) a los consumidores del VPS; Biblos ya no lo usa (capa de embeddings removida 2026-09-26). Log: /tmp/llama-router.log. Preset: /opt/models/router/presets.ini.
 - **MongoDB**: contenedor mongo-prod, 0.0.0.0:27017 — usado por otros proyectos, NO tocar.
 - **Apache + Let's Encrypt**: subdominios activos; `biblos.coltmandev.dev` A record creado por el usuario (pendiente certbot + vhost).
 - Contexto servidor: documentado en el VPS (incluye credenciales — no duplicar en código).
@@ -78,7 +77,7 @@ cd /mnt/1TB/IA/mcp/biblos && git branch -a && git status
 |---|---|
 | **biblos** (systemd, 127.0.0.1:8199) | ✅ active |
 | **openclaw** (systemd, 18789) | ✅ active, HTTPS 200 |
-| **llama.cpp router** (8085 + nomic-embed 36423 + qwen35-4b 45769) | ✅ corriendo (nohup) |
+| **llama.cpp router** (8085 + nomic-embed 36423 + qwen35-4b 45769) | ✅ corriendo (nohup) — chat/otros consumidores; Biblos ya no lo usa (2026-09-26) |
 | **Ollama daemon** (127.0.0.1:11434) | ✅ systemd enabled+active (desde 16 Ago) — sirve modelos cloud de Ollama |
 | **MongoDB** (27017, docker) | ✅ activo — OTROS proyectos, NO tocar |
 
