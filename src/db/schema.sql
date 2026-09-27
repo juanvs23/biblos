@@ -36,9 +36,7 @@ CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
   INSERT INTO documents_fts(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
 END;
 
--- Phase A of the embedding-layer removal: drop the vec0 virtual table (and its
--- shadow tables) left behind by earlier boots. Idempotent — a no-op once gone.
-DROP TABLE IF EXISTS document_embeddings;
+
 
 CREATE TABLE IF NOT EXISTS relations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
