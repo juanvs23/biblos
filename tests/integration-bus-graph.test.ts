@@ -21,9 +21,6 @@ import { GraphService } from '../src/domain/graph.js';
 import { AgentRegistryService } from '../src/domain/registry.js';
 import type { DocumentRecord } from '../src/domain/types.js';
 
-/** 768-dim zero vector fixture — graph integration never touches vectors. */
-const VEC = new Array(768).fill(0);
-
 function makeDoc(content: string): DocumentRecord {
   const now = new Date().toISOString();
   return { id: randomUUID(), content, author: 'alice', createdAt: now, updatedAt: now, tags: [], type: 'note' };
@@ -131,7 +128,7 @@ describe('knowledge graph flow (no network)', () => {
       const b = makeDoc('derived concept');
       const c = makeDoc('leaf detail');
       const d = makeDoc('unrelated');
-      [a, b, c, d].forEach((doc) => store.insertDocument(doc, VEC));
+      [a, b, c, d].forEach((doc) => store.insertDocument(doc));
 
       // graph_edit: add typed relations source -> type -> target
       graph.addRelation({ sourceId: a.id, type: 'derives', targetId: b.id });

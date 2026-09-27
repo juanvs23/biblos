@@ -3,11 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
+import { load } from 'sqlite-vec';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { applyPragmas, migrate } from '../src/db/migrate.js';
 
-const TABLES = ['documents', 'documents_fts', 'document_embeddings', 'relations', 'agents', 'requests'];
+const TABLES = ['documents', 'documents_fts', 'relations', 'agents', 'requests'];
 
 describe('migrate', () => {
   let dir: string;
@@ -31,19 +32,36 @@ describe('migrate', () => {
     ).map((r) => r.name);
   }
 
-  it('creates every core table including FTS5 and vec0 virtual tables', () => {
+  it('creates every core table including the FTS5 virtual table, without the removed vec0 table', () => {
     migrate(db);
     const names = listTables();
     for (const t of TABLES) {
       expect(names, `expected ${t} to exist`).toContain(t);
     }
-    // vec0 (document_embeddings) and fts5 (documents_fts) are virtual tables;
-    // sqlite_master reports type='table' for them, so detect via the SQL text.
+    // Phase A of the embedding removal: document_embeddings must NOT exist.
+    expect(names).not.toContain('document_embeddings');
+    // fts5 (documents_fts) is a virtual table; sqlite_master reports type='table'
+    // for it, so detect via the SQL text.
     const ddl = new Map(
-      (db.prepare("SELECT name, sql FROM sqlite_master WHERE name IN ('documents_fts','document_embeddings')").all() as Array<{ name: string; sql: string }>).map((r) => [r.name, r.sql]),
+      (db.prepare("SELECT name, sql FROM sqlite_master WHERE name IN ('documents_fts')").all() as Array<{ name: string; sql: string }>).map((r) => [r.name, r.sql]),
     );
     expect(ddl.get('documents_fts')).toMatch(/^CREATE VIRTUAL TABLE/);
-    expect(ddl.get('document_embeddings')).toMatch(/^CREATE VIRTUAL TABLE/);
+  });
+
+  it('drops a legacy vec0 table (and its shadow tables) left by earlier boots', () => {
+    // A prod-style database still carries the vec0 virtual table; the migration
+    // must remove it together with its shadow tables.
+    load(db);
+    db.exec('CREATE VIRTUAL TABLE document_embeddings USING vec0(rowid INTEGER PRIMARY KEY, embedding float[768])');
+    db.prepare('INSERT INTO document_embeddings (rowid, embedding) VALUES (?, ?)').run(1n, new Float32Array(768));
+    expect(listTables()).toContain('document_embeddings');
+
+    migrate(db);
+
+    const leftovers = db
+      .prepare("SELECT name FROM sqlite_master WHERE name LIKE 'document_embeddings%'")
+      .all() as Array<{ name: string }>;
+    expect(leftovers).toEqual([]);
   });
 
   it('is idempotent: running migration twice does not error', () => {

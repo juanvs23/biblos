@@ -12,8 +12,8 @@
 # Service runs as a locked-down unprivileged user: the process can only write
 # inside /opt/biblos (SQLite DB, WAL files), cannot spawn new processes
 # (NoNewPrivileges + empty CapabilityBoundingSet), keeps a private /tmp, and can
-# only reach the network via AF_INET/AF_UNIX sockets (the llama router on
-# 127.0.0.1:8085 and the loopback bind on 127.0.0.1:8199).
+# only reach the network via AF_INET/AF_UNIX sockets (the loopback bind on
+# 127.0.0.1:8199).
 
 [Unit]
 Description=Biblos MCP server (documented memory + agent bus)

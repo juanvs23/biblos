@@ -25,7 +25,6 @@ import { describe, expect, it } from 'vitest';
 import { openStore, type Store } from '../src/db/store.js';
 import { createToolsServer } from '../src/server/tools.js';
 import { authHeaders, postJsonRpc, startHttpServer, type RpcHeaders } from './http.js';
-import { bagOfWordsEmbedding, mockEmbeddings } from './helpers.js';
 
 export const TOOL_NAMES = [
   'save_document',
@@ -55,8 +54,7 @@ export interface Harness {
 export async function createHarness(): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'biblos-tools-'));
   const store = openStore(join(dir, 'test.db'));
-  const embeddings = mockEmbeddings();
-  const server = createToolsServer({ store, embeddings, defaults: { fusionWeight: 0.5, minScore: 0 } });
+  const server = createToolsServer({ store, defaults: { minScore: 0 } });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'biblos-test-client', version: '1.0.0' });
   await server.connect(serverTransport);
@@ -255,7 +253,7 @@ describe('memory tools (REQ-memory-save..list)', () => {
     }
   });
 
-  it('search_documents returns ranked hybrid hits with the mock embedding seam', async () => {
+  it('search_documents returns ranked FTS keyword hits', async () => {
     const h = await createHarness();
     try {
       await h.client.callTool({
@@ -267,12 +265,14 @@ describe('memory tools (REQ-memory-save..list)', () => {
         arguments: { content: 'the dog ran in the park', author: 'bob' },
       });
       const result = parseOk(
-        await h.client.callTool({ name: 'search_documents', arguments: { query: 'cat mat', limit: 5, fusion_weight: 0.5 } }),
-      ) as { query: string; count: number; hits: Array<{ score: number }> };
+        await h.client.callTool({ name: 'search_documents', arguments: { query: 'cat mat', limit: 5 } }),
+      ) as { query: string; count: number; hits: Array<{ document: { content: string }; score: number }> };
       expect(result.query).toBe('cat mat');
-      expect(result.count).toBeGreaterThan(0);
-      const scores = result.hits.map((hit) => hit.score);
-      expect([...scores].sort((a, b) => b - a)).toEqual(scores); // ranked descending
+      expect(result.count).toBe(1); // only the cat/mat document matches both terms
+      expect(result.hits[0]?.document.content).toBe('the cat sat on the mat');
+      expect(result.hits[0]?.score).toBeGreaterThan(0);
+      expect(result.hits[0]?.score).toBeLessThanOrEqual(1);
+      expect('matchedBy' in result.hits[0]!).toBe(false); // field removed from the payload
     } finally {
       await h.close();
     }
@@ -386,8 +386,6 @@ describe('bus tools without identity header (REQ-bus-*)', () => {
   });
 });
 
-export { bagOfWordsEmbedding };
-
 // --- HTTP integration: real server + StreamableHTTPServerTransport, no network ---
 
 /** tools/call over raw HTTP; returns the CallToolResult (isError + content). */
@@ -463,7 +461,7 @@ describe('HTTP integration — full JSON-RPC lifecycle (done criteria: transport
         ) as { id: string; content: string };
         expect(saved.content).toBe('meeting notes about the bus protocol');
 
-        // 6. search_documents (mock embedding seam, no router network)
+        // 6. search_documents (FTS5 keyword search, no external services)
         const search = parseOk(
           await callTool(h, next(), 'search_documents', { query: 'meeting notes', limit: 5 }, authHeaders('alice')),
         ) as { query: string; count: number; hits: Array<{ document: { id: string } }> };

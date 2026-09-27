@@ -1,9 +1,9 @@
 /**
  * E2E — agent bus roundtrip over the REAL built server (task 8.1).
  *
- * Spawns `dist/index.js` (temp DB, temp port, stub embedding router) and drives
- * the two-agent lifecycle through the official MCP SDK Client over Streamable
- * HTTP, exactly as OpenClaw/OpenCode would:
+ * Spawns `dist/index.js` (temp DB, temp port) and drives the two-agent
+ * lifecycle through the official MCP SDK Client over Streamable HTTP, exactly
+ * as OpenClaw/OpenCode would:
  *
  *   1. registration-first rule: unregistered sender is rejected (REQ-registry)
  *   2. request_send  -> pendiente, unique id, sender from header (REQ-bus-send)
@@ -24,7 +24,6 @@ import {
   parseOk,
   registerAgent,
   spawnBiblos,
-  startEmbeddingStub,
   type SpawnedBiblos,
 } from './harness.js';
 
@@ -37,9 +36,7 @@ afterEach(async () => {
 
 describe('E2E — bus roundtrip over built server (REQ-bus-send/poll/respond/status)', () => {
   it('two agents complete send -> poll -> respond -> status', { timeout: 30_000 }, async () => {
-    const stub = await startEmbeddingStub();
-    cleanups.push(() => stub.close());
-    const server = await spawnBiblos({ routerUrl: stub.url });
+    const server = await spawnBiblos({});
     cleanups.push(() => server.remove());
 
     const alice = await connectAgent(server.url, 'alice');
@@ -107,10 +104,7 @@ describe('E2E — bus roundtrip over built server (REQ-bus-send/poll/respond/sta
 
 describe('E2E — queue survives a server restart (REQ-bus-status, REQ-core-persistence)', () => {
   it('keeps pendiente/completada states across a fresh process on the same DB', { timeout: 40_000 }, async () => {
-    const stub = await startEmbeddingStub();
-    cleanups.push(() => stub.close());
-
-    const first = await spawnBiblos({ routerUrl: stub.url });
+    const first = await spawnBiblos({});
     cleanups.push(() => first.remove());
 
     const alice = await connectAgent(first.url, 'alice');
@@ -140,7 +134,7 @@ describe('E2E — queue survives a server restart (REQ-bus-status, REQ-core-pers
 
     // --- restart: kill the process, spawn a NEW one on the SAME DB file ---
     await first.stop();
-    const second: SpawnedBiblos = await spawnBiblos({ routerUrl: stub.url, dbPath: first.dbPath, dir: first.dir });
+    const second: SpawnedBiblos = await spawnBiblos({ dbPath: first.dbPath, dir: first.dir });
     cleanups.push(() => second.remove());
 
     // REQ-bus-status: every request retains its pre-restart state and payload.

@@ -1,7 +1,7 @@
 {
   "name": "biblos",
   "version": "0.1.0",
-  "description": "Multi-agent MCP server with documented vectorized memory, knowledge graph, and agent bus (SQLite + FTS5 + sqlite-vec).",
+  "description": "Multi-agent MCP server with documented memory, knowledge graph, and agent bus (SQLite + FTS5).",
   "type": "module",
   "license": "MIT",
   "engines": {

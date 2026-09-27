@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { openStore, type Store } from '../src/db/store.js';
+import { ftsScore, openStore, type Store } from '../src/db/store.js';
 import type { AgentRecord, BusRequest, DocumentRecord, Relation } from '../src/domain/types.js';
 
 function makeDoc(overrides: Partial<DocumentRecord> = {}): DocumentRecord {
@@ -30,10 +30,19 @@ function makeRequest(id: string, sender: string, recipient: string, payload: unk
   return { id, sender, recipient, payload, state: 'pendiente', createdAt: new Date().toISOString() };
 }
 
-/** Deterministic small vector of length 768 used as an embedding fixture. */
-function vec(base: number): number[] {
-  return new Array(768).fill(0).map((_, i) => (i === 0 ? base : base / (i + 1)));
-}
+describe('ftsScore', () => {
+  it('normalizes bm25 into (0, 1] with golden values', () => {
+    expect(ftsScore(0)).toBe(1);
+    expect(ftsScore(-1)).toBe(0.5);
+    expect(ftsScore(-3)).toBe(0.25);
+    expect(ftsScore(-0.5)).toBeCloseTo(2 / 3);
+  });
+
+  it('is monotonic in bm25: better (more negative) matches score lower', () => {
+    expect(ftsScore(-5)).toBeLessThan(ftsScore(-1));
+    expect(ftsScore(-1)).toBeLessThan(ftsScore(-0.1));
+  });
+});
 
 describe('Store', () => {
   let dir: string;
@@ -53,7 +62,7 @@ describe('Store', () => {
 
   it('inserts and reads a document back with parsed metadata', () => {
     const doc = makeDoc({ content: '# Hello\n\nMarkdown body', tags: ['notes', 'scratch'], project: 'biblos', type: 'note' });
-    store.insertDocument(doc, vec(0.5));
+    store.insertDocument(doc);
 
     const loaded = store.getDocument(doc.id);
     expect(loaded).toEqual(doc);
@@ -61,7 +70,7 @@ describe('Store', () => {
 
   it('keeps FTS index in sync via triggers across insert, update, delete', () => {
     const doc = makeDoc({ content: 'alpha beta gamma' });
-    store.insertDocument(doc, vec(0.5));
+    store.insertDocument(doc);
 
     expect(store.ftsSearch('alpha', 10)).toHaveLength(1);
 
@@ -83,30 +92,18 @@ describe('Store', () => {
   });
 
   it('handles punctuation in FTS queries without syntax errors', () => {
-    store.insertDocument(makeDoc({ content: 'frogs: are green (mostly)' }), vec(0.5));
+    store.insertDocument(makeDoc({ content: 'frogs: are green (mostly)' }));
     expect(store.ftsSearch('green', 10)).toHaveLength(1);
     // colon + mixed tokens must be sanitized into valid MATCH syntax, not throw
     expect(store.ftsSearch('frogs: are green', 10)).toHaveLength(1);
     expect(store.ftsSearch('nope zzz', 10)).toHaveLength(0);
   });
 
-  it('runs vector search returning nearest distances', () => {
-    const a = makeDoc({ content: 'first' });
-    const b = makeDoc({ content: 'second' });
-    store.insertDocument(a, vec(0.1));
-    store.insertDocument(b, vec(0.9));
-
-    const hits = store.vectorSearch(vec(0.1), 10);
-    expect(hits).toHaveLength(2);
-    expect(hits[0]?.distance).toBeLessThan(hits[1]?.distance ?? Infinity);
-    expect(store.getDocumentByRowid(hits[0]!.rowid)?.id).toBe(a.id);
-  });
-
-  it('deletes a document atomically: embedding gone and relations cascade', () => {
+  it('deletes a document atomically: relations cascade', () => {
     const a = makeDoc({ content: 'node a' });
     const b = makeDoc({ content: 'node b' });
-    store.insertDocument(a, vec(0.1));
-    store.insertDocument(b, vec(0.2));
+    store.insertDocument(a);
+    store.insertDocument(b);
     const rel: Relation = { sourceId: a.id, type: 'related', targetId: b.id };
     store.addRelation(rel);
     expect(store.queryGraph(a.id, undefined, 1).edges).toHaveLength(1);
@@ -117,9 +114,8 @@ describe('Store', () => {
     expect(store.getDocument(a.id)).toBeNull();
     expect(store.queryGraph(a.id, undefined, 1).edges).toHaveLength(0);
     expect(store.getDocument(b.id)).not.toBeNull();
-    // embedding row removed -> vector search no longer returns it
-    const ids = store.vectorSearch(vec(0.1), 10).map((h) => store.getDocumentByRowid(h.rowid)?.id);
-    expect(ids).not.toContain(a.id);
+    // FTS row removed with the document -> no keyword hits remain
+    expect(store.ftsSearch('node', 10).map((h) => store.getDocumentByRowid(h.rowid)?.id)).not.toContain(a.id);
   });
 
   it('returns false when deleting an unknown document', () => {
@@ -132,7 +128,7 @@ describe('Store', () => {
       makeDoc({ content: 'two', project: 'p1', tags: ['x', 'y'] }),
       makeDoc({ content: 'three', project: 'p2', tags: ['y'] }),
     ];
-    docs.forEach((d) => store.insertDocument(d, vec(0.1)));
+    docs.forEach((d) => store.insertDocument(d));
 
     const p1x = store.listDocuments({ project: 'p1', tags: ['x'], limit: 10, offset: 0 });
     expect(p1x.map((d) => d.id).sort()).toEqual([docs[0]!.id, docs[1]!.id].sort());
@@ -149,14 +145,14 @@ describe('Store', () => {
     store.registerAgent(makeAgent('alice'));
     store.registerAgent(makeAgent('bob'));
     const doc = makeDoc({ content: 'persisted note' });
-    store.insertDocument(doc, vec(0.3));
+    store.insertDocument(doc);
     store.enqueue(makeRequest('req-1', 'alice', 'bob', { task: 'ping' }));
 
     store.close();
     store = openStore(dbPath);
 
     expect(store.getDocument(doc.id)?.content).toBe('persisted note');
-    expect(store.vectorSearch(vec(0.3), 10)).toHaveLength(1);
+    expect(store.ftsSearch('persisted', 10)).toHaveLength(1); // FTS index persisted too
     const status = store.status('req-1');
     expect(status?.state).toBe('pendiente');
     expect(status?.payload).toEqual({ task: 'ping' });
@@ -215,7 +211,7 @@ describe('Store', () => {
     const a = makeDoc({ content: 'a' });
     const b = makeDoc({ content: 'b' });
     const c = makeDoc({ content: 'c' });
-    [a, b, c].forEach((d) => store.insertDocument(d, vec(0.1)));
+    [a, b, c].forEach((d) => store.insertDocument(d));
 
     store.addRelation({ sourceId: a.id, type: 'related', targetId: b.id });
     store.addRelation({ sourceId: b.id, type: 'related', targetId: c.id });

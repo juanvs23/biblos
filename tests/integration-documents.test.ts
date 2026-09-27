@@ -1,17 +1,17 @@
 /**
  * Work unit 1 runtime harness: full document lifecycle against a real SQLite
- * store with the embedding router mocked at the seam - NO network required.
- * save -> hybrid search -> update (metadata + content) -> delete.
+ * store — no network required.
+ * save -> keyword search -> update (metadata + content) -> delete.
  */
 import { describe, expect, it } from 'vitest';
 
 import { createHarness } from './helpers.js';
 
 describe('document lifecycle integration (no network)', () => {
-  it('save, hybrid search, update, and delete work end to end', async () => {
+  it('save, keyword search, update, and delete work end to end', async () => {
     const h = createHarness();
     try {
-      // 1. save two documents; embeddings come from the mocked seam
+      // 1. save two documents
       const frogs = await h.documents.save({
         content: 'frogs are green and hop around ponds',
         author: 'alice',
@@ -25,27 +25,30 @@ describe('document lifecycle integration (no network)', () => {
         project: 'mcp',
       });
 
-      // 2. hybrid search: the query shares a token with the frog doc, so it is
-      //    matched by BOTH semantic and FTS, and ranks first
+      // 2. keyword search: only the frog document contains the term, so it is
+      //    the single FTS hit and ranks first
       const hits = await h.documents.search('frogs');
-      expect(hits.length).toBeGreaterThan(0);
+      expect(hits).toHaveLength(1);
       expect(hits[0]?.document.id).toBe(frogs.id);
-      expect(hits[0]?.matchedBy).toBe('both');
       expect(hits[0]?.score).toBeGreaterThan(0);
+      expect('matchedBy' in hits[0]!).toBe(false);
 
-      // 3. metadata-only update: no re-embedding call
-      const embedCalls = h.embeddings.calls.length;
+      // 3. metadata-only update: content and index untouched, updated_at refreshed
+      //    (3ms tick: updatedAt has ISO ms resolution and no embed step separates
+      //    the writes since the embedding layer was removed)
+      await new Promise((r) => setTimeout(r, 3));
       const metaUpdated = await h.documents.update(frogs.id, { tags: ['fauna', 'ponds'] });
-      expect(h.embeddings.calls).toHaveLength(embedCalls);
       expect(metaUpdated.updatedAt).not.toBe(frogs.updatedAt);
+      expect(await h.documents.search('frogs')).toHaveLength(1);
 
-      //    content update: exactly one re-embedding call
-      const reembedded = await h.documents.update(http.id, { content: 'the server handles HTTP and JSON requests' });
-      expect(h.embeddings.calls).toHaveLength(embedCalls + 1);
-      expect(h.embeddings.calls[embedCalls]).toBe('the server handles HTTP and JSON requests');
-      expect(reembedded.updatedAt).not.toBe(http.updatedAt);
+      //    content update: the FTS index follows the new content
+      await new Promise((r) => setTimeout(r, 3));
+      const reupdated = await h.documents.update(http.id, { content: 'the server handles HTTP and JSON requests' });
+      expect(reupdated.updatedAt).not.toBe(http.updatedAt);
+      expect(await h.documents.search('parses')).toHaveLength(0);
+      expect(await h.documents.search('JSON')).toHaveLength(1);
 
-      // 4. delete removes the document, its embedding, and any edges
+      // 4. delete removes the document and any edges
       h.documents.delete(frogs.id);
       const after = await h.documents.search('frogs');
       expect(after.some((hit) => hit.document.id === frogs.id)).toBe(false);

@@ -8,8 +8,8 @@
  * Error mapping (SDK 1.30.0 wraps every thrown tool error into an isError:true
  * tool result, per the 2025-11-25 spec — JSON-RPC error codes never surface
  * from tools/call):
- *   - DomainError/EmbeddingError -> isError result with `{ error: { code,
- *     message } }` in the text payload.
+ *   - DomainError -> isError result with `{ error: { code, message } }` in the
+ *     text payload.
  *   - Missing X-Biblos-Agent header on an identity-required tool -> isError
  *     result with code `invalid_params`.
  *   - Anything unexpected -> isError result with code `internal_error`.
@@ -34,8 +34,6 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import type { Store } from '../db/store.js';
-import { EmbeddingError } from '../embeddings/client.js';
-import type { EmbeddingClient } from '../embeddings/client.js';
 import { AgentBusService } from '../domain/bus.js';
 import { DocumentsService } from '../domain/documents.js';
 import { DomainError } from '../domain/errors.js';
@@ -52,8 +50,7 @@ export interface ToolRequestExtra {
 
 export interface ToolDeps {
   store: Store;
-  embeddings: EmbeddingClient;
-  defaults: { fusionWeight: number; minScore: number };
+  defaults: { minScore: number };
 }
 
 // --- result helpers ---
@@ -66,9 +63,9 @@ function errorResult(code: string, message: string): CallToolResult {
   return { content: [{ type: 'text', text: JSON.stringify({ error: { code, message } }, null, 2) }], isError: true };
 }
 
-/** Domain/embedding failures -> isError result; unexpected -> internal_error result. No throw escapes. */
+/** Domain failures -> isError result; unexpected -> internal_error result. No throw escapes. */
 function toErrorResult(err: unknown): CallToolResult {
-  if (err instanceof DomainError || err instanceof EmbeddingError) {
+  if (err instanceof DomainError) {
     return errorResult(err.code, err.message);
   }
   if (err instanceof McpError) {
@@ -135,7 +132,6 @@ const updateDocumentSchema = {
 const searchDocumentsSchema = {
   query: z.string().min(1),
   limit: z.number().int().min(1).max(100).optional(),
-  fusion_weight: z.number().min(0).max(1).optional(),
 };
 
 const listDocumentsSchema = {
@@ -186,10 +182,10 @@ const registerAgentSchema = {
 
 /**
  * Build the Biblos McpServer with all 14 tools registered over the domain
- * services. Callers own the Store/EmbeddingClient lifecycle.
+ * services. Callers own the Store lifecycle.
  */
 export function createToolsServer(deps: ToolDeps): McpServer {
-  const documents = new DocumentsService(deps.store, deps.embeddings, deps.defaults);
+  const documents = new DocumentsService(deps.store, deps.defaults);
   const graph = new GraphService(deps.store);
   const registry = new AgentRegistryService(deps.store);
   const bus = new AgentBusService(deps.store, registry);
@@ -204,7 +200,7 @@ export function createToolsServer(deps: ToolDeps): McpServer {
       title: 'Save document',
       description:
         'Store a Markdown document with metadata (author, tags, project, type). ' +
-        'Embeds the content (768-dim) before persisting; returns the document with a unique id.',
+        'Returns the document with a unique id.',
       inputSchema: saveDocumentSchema,
     },
     (args) => callAsync(() => documents.save(args)),
@@ -225,8 +221,8 @@ export function createToolsServer(deps: ToolDeps): McpServer {
     {
       title: 'Update document',
       description:
-        'Update document content and/or metadata. Re-embeds only when the content changes; ' +
-        'metadata-only updates keep the stored vector.',
+        'Update document content and/or metadata. The full-text index is kept ' +
+        'in sync automatically.',
       inputSchema: updateDocumentSchema,
     },
     (args) => callAsync(() => documents.update(args.id, args)),
@@ -236,7 +232,7 @@ export function createToolsServer(deps: ToolDeps): McpServer {
     'delete_document',
     {
       title: 'Delete document',
-      description: 'Atomically remove a document, its embedding, and its graph edges.',
+      description: 'Atomically remove a document and its graph edges.',
       inputSchema: getDocumentSchema,
     },
     (args) => call(() => {
@@ -250,16 +246,13 @@ export function createToolsServer(deps: ToolDeps): McpServer {
     {
       title: 'Search documents',
       description:
-        'Hybrid semantic + keyword search with a configurable fusion weight ' +
-        '(default 0.5 = 50/50), ranked by merged score.',
+        'Keyword (FTS5) search over document content and tags, ranked by bm25 relevance. ' +
+        'Hits below the configured BIBLOS_MIN_SCORE threshold are dropped.',
       inputSchema: searchDocumentsSchema,
     },
     (args) =>
       callAsync(async () => {
-        const hits = await documents.search(args.query, {
-          limit: args.limit,
-          fusionWeight: args.fusion_weight,
-        });
+        const hits = await documents.search(args.query, { limit: args.limit });
         return { query: args.query, count: hits.length, hits };
       }),
   );

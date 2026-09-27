@@ -13,9 +13,9 @@
  *
  * Stateless mode (design D3): no MCP-Session-Id, so the SDK requires a fresh
  * transport — and per the SDK's own stateless example a fresh McpServer too —
- * per request. Domain services wrap the shared Store/EmbeddingClient, so the
- * per-request cost is only protocol wiring. The agent identity header
- * (X-Biblos-Agent) reaches tool callbacks via `extra.requestInfo.headers`.
+ * per request. Domain services wrap the shared Store, so the per-request cost
+ * is only protocol wiring. The agent identity header (X-Biblos-Agent) reaches
+ * tool callbacks via `extra.requestInfo.headers`.
  */
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
@@ -25,16 +25,11 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { checkAuth, type AuthConfig } from './auth.js';
 import { loadConfig, type Config } from './config.js';
 import { openStore, type Store } from './db/store.js';
-import { RouterEmbeddingClient, type EmbeddingClient } from './embeddings/client.js';
 import { createToolsServer } from './server/tools.js';
-
-const EMBED_DIMENSION = 768;
 
 export interface ServerDeps {
   /** Inject a store (tests use a temp file); defaults to openStore(config.dbPath). */
   store?: Store;
-  /** Inject an embedding client (tests mock at this seam); defaults to the router client. */
-  embeddings?: EmbeddingClient;
 }
 
 export interface CreatedServer {
@@ -58,20 +53,9 @@ export async function createServer(config: Config, deps: ServerDeps = {}): Promi
   const authConfig: AuthConfig = { apiKey, allowedOrigins };
 
   const store = deps.store ?? openStore(config.dbPath);
-  const embeddings =
-    deps.embeddings ??
-    new RouterEmbeddingClient({
-      routerUrl: config.routerUrl,
-      model: config.embedModel,
-      timeoutMs: config.embedTimeoutMs,
-      connectTimeoutMs: config.embedConnectTimeoutMs,
-      retries: 1,
-      dimension: EMBED_DIMENSION,
-    });
-
-  const defaults = { fusionWeight: config.fusionWeight, minScore: config.minScore };
+  const defaults = { minScore: config.minScore };
   const server = http.createServer((req, res) => {
-    void handleRequest(req, res, authConfig, store, embeddings, defaults);
+    void handleRequest(req, res, authConfig, store, defaults);
   });
 
   return { server, store };
@@ -82,8 +66,7 @@ async function handleRequest(
   res: http.ServerResponse,
   authConfig: AuthConfig,
   store: Store,
-  embeddings: EmbeddingClient,
-  defaults: { fusionWeight: number; minScore: number },
+  defaults: { minScore: number },
 ): Promise<void> {
   try {
     // 1. Auth first, every request (REQ-core-auth): Origin -> 403, Bearer -> 401.
@@ -103,7 +86,7 @@ async function handleRequest(
 
     // 3. Stateless Streamable HTTP: fresh transport + McpServer per request
     // (SDK stateless pattern — a stateless transport cannot be reused).
-    const mcpServer = createToolsServer({ store, embeddings, defaults });
+    const mcpServer = createToolsServer({ store, defaults });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless (D3): no MCP-Session-Id
       enableJsonResponse: true, // plain JSON replies (design reply shape)

@@ -41,5 +41,4 @@ export interface AgentRecord {
 export interface SearchHit {
   document: DocumentRecord;
   score: number;
-  matchedBy: 'semantic' | 'fts' | 'both';
 }

@@ -2,14 +2,10 @@
  * E2E harness (tasks 8.1-8.3, design "Testing Strategy" E2E rows).
  *
  * Spawns the REAL built server (`dist/index.js`) as a child process with a temp
- * DB file, a free loopback port, and a local embedding-router stub, then drives
- * it through the official MCP SDK `Client` over `StreamableHTTPClientTransport`
- * — the same path a real client (OpenClaw/OpenCode) uses.
- *
- * The real llama.cpp router is NEVER required in CI: the stub answers
- * `/v1/embeddings` with the same deterministic bag-of-words vectors used by the
- * unit-test seam (`tests/helpers.ts`), so search semantics are identical to the
- * mocked seam but cross a real HTTP boundary.
+ * DB file and a free loopback port, then drives it through the official MCP SDK
+ * `Client` over `StreamableHTTPClientTransport` — the same path a real client
+ * (OpenClaw/OpenCode) uses. The server has no external dependencies, so no
+ * stubs or routers are needed.
  *
  * The SDK client transport handles our stateless JSON server: POST replies are
  * parsed as `application/json`, and the GET SSE probe gets a 405 which the SDK
@@ -18,7 +14,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { once } from 'node:events';
-import { createServer as createHttpServer, type Server } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -29,7 +24,6 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { expect } from 'vitest';
 
-import { bagOfWordsEmbedding } from '../helpers.js';
 import { TEST_API_KEY, TEST_ORIGIN } from '../http.js';
 
 const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -49,52 +43,9 @@ async function getFreePort(): Promise<number> {
   return port;
 }
 
-// --- embedding router stub (fixed mock vectors, no llama.cpp needed) ---
-
-export interface EmbeddingStub {
-  url: string;
-  close(): Promise<void>;
-}
-
-/**
- * Minimal OpenAI-compatible embeddings endpoint. Returns deterministic
- * L2-normalized bag-of-words vectors so documents sharing words (or hashing to
- * the same bucket) score high — semantic behavior without the real router.
- */
-export async function startEmbeddingStub(): Promise<EmbeddingStub> {
-  const server: Server = createHttpServer(async (req, res) => {
-    if (req.method === 'POST' && (req.url === '/v1/embeddings' || req.url === '/v1/embeddings/')) {
-      let raw = '';
-      for await (const chunk of req) raw += String(chunk);
-      try {
-        const body = JSON.parse(raw) as { model?: string; input?: string };
-        const text = typeof body.input === 'string' ? body.input : '';
-        const embedding = bagOfWordsEmbedding(text);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ data: [{ embedding, index: 0 }] }));
-      } catch (err) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
-      }
-      return;
-    }
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'not_found' }));
-  });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const { port } = server.address() as AddressInfo;
-  return {
-    url: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-  };
-}
-
 // --- spawned built server ---
 
 export interface SpawnBiblosOptions {
-  /** Embedding router base URL (the stub, unless overridden). */
-  routerUrl: string;
   /** Reuse an existing DB file (restart-persistence test); default: fresh temp file. */
   dbPath?: string;
   /** Reuse an existing temp dir; default: fresh temp dir. */
@@ -172,11 +123,6 @@ export async function spawnBiblos(options: SpawnBiblosOptions): Promise<SpawnedB
     DB_PATH: dbPath,
     BIBLOS_HOST: '127.0.0.1',
     BIBLOS_PORT: String(port),
-    ROUTER_URL: options.routerUrl,
-    BIBLOS_EMBED_MODEL: 'nomic-embed-text-v1.5.Q8_0',
-    BIBLOS_EMBED_TIMEOUT_MS: '5000',
-    BIBLOS_EMBED_CONNECT_TIMEOUT_MS: '2000',
-    BIBLOS_FUSION_WEIGHT: '0.5',
     BIBLOS_MIN_SCORE: String(options.minScore ?? 0),
   };
   const child = spawn(process.execPath, ['dist/index.js'], {

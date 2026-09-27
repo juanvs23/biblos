@@ -18,9 +18,13 @@ export function applyPragmas(db: Database.Database): void {
 }
 
 /**
- * Idempotent boot migration. Loads the sqlite-vec extension (required before the
- * vec0 DDL), applies connection pragmas, and executes schema.sql (all DDL uses
- * IF NOT EXISTS, so running twice is a no-op). Safe to call on every boot.
+ * Idempotent boot migration. Loads the sqlite-vec extension — [DEBT] Phase A of
+ * the embedding removal: legacy databases still carry a vec0 table that cannot be
+ * parsed — not even dropped — without the module. Phase B removes this load and
+ * the sqlite-vec dependency once production is verified migrated. Applies
+ * connection pragmas, then executes schema.sql (CREATE ... IF NOT EXISTS plus
+ * the DROP of the removed vec0 table, so running twice is a no-op). Safe to
+ * call on every boot.
  */
 export function migrate(db: Database.Database): void {
   load(db);

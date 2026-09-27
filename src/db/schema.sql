@@ -1,4 +1,4 @@
--- Biblos SQLite schema: documents + FTS5, vec0 embeddings, relations, agents, requests.
+-- Biblos SQLite schema: documents + FTS5, relations, agents, requests.
 -- Applied idempotently by src/db/migrate.ts on every boot (all DDL uses IF NOT EXISTS).
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -36,10 +36,9 @@ CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
   INSERT INTO documents_fts(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
 END;
 
-CREATE VIRTUAL TABLE IF NOT EXISTS document_embeddings USING vec0(
-  rowid INTEGER PRIMARY KEY,
-  embedding float[768]
-);
+-- Phase A of the embedding-layer removal: drop the vec0 virtual table (and its
+-- shadow tables) left behind by earlier boots. Idempotent — a no-op once gone.
+DROP TABLE IF EXISTS document_embeddings;
 
 CREATE TABLE IF NOT EXISTS relations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

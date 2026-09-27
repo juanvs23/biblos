@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { DocumentsService } from '../src/domain/documents.js';
-import { DomainError } from '../src/domain/errors.js';
-import { EmbeddingError } from '../src/embeddings/client.js';
-import { bagOfWordsEmbedding, createHarness, mockEmbeddings } from './helpers.js';
+import { createHarness } from './helpers.js';
 
 describe('DocumentsService', () => {
-  it('saves a document with generated id, metadata defaults, and embedding', async () => {
+  it('saves a document with generated id and metadata defaults', async () => {
     const h = createHarness();
     try {
       const doc = await h.documents.save({
@@ -20,12 +17,9 @@ describe('DocumentsService', () => {
       expect(doc.type).toBe('doc');
       expect(doc.tags).toEqual(['x']);
       expect(doc.project).toBe('p1');
-      expect(h.embeddings.calls).toHaveLength(1);
-      expect(h.embeddings.calls[0]).toBe('# Note\n\nbody');
       expect(h.store.getDocument(doc.id)).toEqual(doc);
-      // embedding persisted -> vector search finds it
-      const hits = h.store.vectorSearch(bagOfWordsEmbedding('# Note\n\nbody'), 10);
-      expect(hits.map((x) => h.store.getDocumentByRowid(x.rowid)?.id)).toContain(doc.id);
+      // the saved document is full-text searchable
+      expect(h.store.ftsSearch('body', 10).map((x) => h.store.getDocumentByRowid(x.rowid)?.id)).toContain(doc.id);
     } finally {
       h.close();
     }
@@ -41,7 +35,6 @@ describe('DocumentsService', () => {
         code: 'invalid_document',
       });
       expect(h.store.listDocuments({ limit: 10, offset: 0 })).toHaveLength(0);
-      expect(h.embeddings.calls).toHaveLength(0);
     } finally {
       h.close();
     }
@@ -56,15 +49,18 @@ describe('DocumentsService', () => {
     }
   });
 
-  it('metadata-only update refreshes updated_at without re-embedding (REQ-memory-update)', async () => {
+  it('metadata-only update refreshes updated_at (REQ-memory-update)', async () => {
     const h = createHarness();
     try {
       const doc = await h.documents.save({ content: 'stable content', author: 'alice', tags: ['a'] });
-      const embedCalls = h.embeddings.calls.length;
+
+      // updatedAt has ISO millisecond resolution; guarantee a tick so the
+      // same-millisecond save→update pair cannot collide (with the embedding
+      // layer gone, no network call separates the two writes anymore).
+      await new Promise((r) => setTimeout(r, 3));
 
       const updated = await h.documents.update(doc.id, { author: 'bob', tags: ['a', 'b'], project: 'p2' });
 
-      expect(h.embeddings.calls).toHaveLength(embedCalls); // no new embed call
       expect(updated.author).toBe('bob');
       expect(updated.tags).toEqual(['a', 'b']);
       expect(updated.project).toBe('p2');
@@ -75,24 +71,27 @@ describe('DocumentsService', () => {
     }
   });
 
-  it('content change regenerates the embedding (REQ-memory-update)', async () => {
+  it('content update changes the content and refreshes updated_at (REQ-memory-update)', async () => {
     const h = createHarness();
     try {
       const doc = await h.documents.save({ content: 'old content', author: 'alice' });
-      const embedCalls = h.embeddings.calls.length;
+
+      // Same-millisecond guard as above (ISO ms-resolution timestamps).
+      await new Promise((r) => setTimeout(r, 3));
 
       const updated = await h.documents.update(doc.id, { content: 'brand new content' });
 
-      expect(h.embeddings.calls).toHaveLength(embedCalls + 1);
-      expect(h.embeddings.calls[embedCalls]).toBe('brand new content');
       expect(updated.content).toBe('brand new content');
       expect(updated.updatedAt).not.toBe(doc.updatedAt);
+      // the FTS index follows the content change (trigger-synced)
+      expect(h.store.ftsSearch('brand', 10)).toHaveLength(1);
+      expect(h.store.ftsSearch('old', 10)).toHaveLength(0);
     } finally {
       h.close();
     }
   });
 
-  it('delete removes the document, its embedding, and relation edges atomically (REQ-memory-delete)', async () => {
+  it('delete removes the document and relation edges atomically (REQ-memory-delete)', async () => {
     const h = createHarness();
     try {
       const a = await h.documents.save({ content: 'node a', author: 'alice' });
@@ -103,8 +102,6 @@ describe('DocumentsService', () => {
 
       expect(() => h.documents.get(a.id)).toThrow('not found');
       expect(h.store.queryGraph(a.id, undefined, 2).edges).toHaveLength(0);
-      const leftover = h.store.vectorSearch(bagOfWordsEmbedding('node a'), 10);
-      expect(leftover.map((x) => h.store.getDocumentByRowid(x.rowid)?.id)).not.toContain(a.id);
       expect(h.documents.get(b.id).id).toBe(b.id);
     } finally {
       h.close();
@@ -116,24 +113,6 @@ describe('DocumentsService', () => {
     try {
       expect(() => h.documents.delete('missing')).toThrow('not found');
       expect(h.store.listDocuments({ limit: 10, offset: 0 })).toHaveLength(0);
-    } finally {
-      h.close();
-    }
-  });
-
-  it('router failure during save surfaces the error and writes nothing (REQ-core-embeddings)', async () => {
-    const h = createHarness();
-    try {
-      const failing = mockEmbeddings(() => {
-        throw new EmbeddingError('embedding_service_unavailable', 'router down');
-      });
-      const service = new DocumentsService(h.store, failing, { fusionWeight: 0.5, minScore: 0 });
-
-      await expect(service.save({ content: 'x', author: 'alice' })).rejects.toMatchObject({
-        code: 'embedding_service_unavailable',
-      });
-      expect(h.store.listDocuments({ limit: 10, offset: 0 })).toHaveLength(0);
-      expect(h.store.vectorSearch(bagOfWordsEmbedding('x'), 10)).toHaveLength(0);
     } finally {
       h.close();
     }
@@ -161,7 +140,7 @@ describe('DocumentsService', () => {
     }
   });
 
-  it('searches with hybrid fusion returning ranked hits (REQ-memory-search)', async () => {
+  it('searches by keyword returning ranked FTS hits (REQ-memory-search)', async () => {
     const h = createHarness();
     try {
       await h.documents.save({ content: 'frogs are green and hop around ponds', author: 'a', tags: ['fauna'] });
@@ -169,14 +148,21 @@ describe('DocumentsService', () => {
 
       const hits = await h.documents.search('frogs', { limit: 5 });
 
-      expect(hits.length).toBeGreaterThan(0);
+      expect(hits).toHaveLength(1);
       expect(hits[0]?.document.content).toContain('frogs');
       expect(hits[0]?.score).toBeGreaterThan(0);
-      expect(hits[0]?.matchedBy).toBeDefined();
-      // scores strictly descending
-      for (let i = 1; i < hits.length; i++) {
-        expect(hits[i]!.score).toBeLessThanOrEqual(hits[i - 1]!.score);
-      }
+      expect(hits[0]?.score).toBeLessThanOrEqual(1);
+      expect('matchedBy' in hits[0]!).toBe(false); // field removed from the payload
+    } finally {
+      h.close();
+    }
+  });
+
+  it('drops every hit when minScore is above all scores (BIBLOS_MIN_SCORE)', async () => {
+    const h = createHarness({ minScore: 1 });
+    try {
+      await h.documents.save({ content: 'frogs are green and hop around ponds', author: 'a' });
+      expect(await h.documents.search('frogs')).toEqual([]);
     } finally {
       h.close();
     }

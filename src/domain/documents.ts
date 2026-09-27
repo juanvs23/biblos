@@ -1,16 +1,15 @@
 /**
- * Document domain service (design: src/domain/documents.ts, tasks 4.2).
+ * Document domain service (design: src/domain/documents.ts).
  *
- * - save: validate -> embed FIRST (D6) -> atomic store txn (doc + fts + vec).
- * - update: re-embed only when content changed; metadata-only updates skip the router.
- * - delete: atomic removal of doc + embedding + relation edges.
- * - search: embed query -> vec0 kNN (k=50) + FTS (k=50) -> fuse -> top limit.
+ * - save: validate -> atomic store insert (FTS row synced by trigger).
+ * - update: apply the patch; the FTS index is refreshed by trigger.
+ * - delete: atomic removal of doc + relation edges.
+ * - search: FTS5 keyword search (bm25-ranked, best match first) ->
+ *   normalize -> minScore threshold -> limit.
  */
 import { randomUUID } from 'node:crypto';
 
-import type { DocumentPatch, Store } from '../db/store.js';
-import type { EmbeddingClient } from '../embeddings/client.js';
-import { fuse } from '../hybrid/fusion.js';
+import { ftsScore, type DocumentPatch, type Store } from '../db/store.js';
 import { DomainError } from './errors.js';
 import type { DocumentRecord, SearchHit } from './types.js';
 
@@ -39,22 +38,22 @@ export interface ListOptions {
 
 export interface SearchOptions {
   limit?: number;
-  fusionWeight?: number;
 }
 
 export const DEFAULT_SEARCH_LIMIT = 10;
 export const MAX_SEARCH_LIMIT = 100;
-export const VECTOR_CANDIDATES = 50;
+export const FTS_CANDIDATES = 100;
+// Candidate pool for FTS search. Must stay >= the search tool's MAX_SEARCH_LIMIT
+// (100) so a high limit never silently truncates results.
 const DEFAULT_LIST_LIMIT = 50;
 
 export class DocumentsService {
   constructor(
     private readonly store: Store,
-    private readonly embeddings: EmbeddingClient,
-    private readonly defaults: { fusionWeight: number; minScore: number },
+    private readonly defaults: { minScore: number },
   ) {}
 
-  /** Validate then embed-then-persist; router failure never leaves partial rows (D6, REQ-core-embeddings). */
+  /** Validate then persist; returns the stored document (REQ-memory-save). */
   async save(input: DocumentInput): Promise<DocumentRecord> {
     validateSave(input);
     const now = new Date().toISOString();
@@ -68,8 +67,7 @@ export class DocumentsService {
       project: input.project,
       type: input.type ?? 'note',
     };
-    const embedding = await this.embeddings.embed(input.content);
-    this.store.insertDocument(doc, embedding);
+    this.store.insertDocument(doc);
     return doc;
   }
 
@@ -79,18 +77,12 @@ export class DocumentsService {
     return doc;
   }
 
-  /** Re-embed only on content change; metadata-only updates keep the stored vector (REQ-memory-update). */
+  /** Apply the patch and refresh updated_at; the FTS index is kept in sync by trigger (REQ-memory-update). */
   async update(id: string, patch: DocumentUpdate): Promise<DocumentRecord> {
     if (patch.content !== undefined && patch.content.length === 0) {
       throw new DomainError('invalid_document', 'document content must not be empty');
     }
-    const existing = this.get(id);
-    const contentChanged = patch.content !== undefined && patch.content !== existing.content;
-
-    let reembed: number[] | undefined;
-    if (contentChanged) {
-      reembed = await this.embeddings.embed(patch.content as string);
-    }
+    this.get(id);
 
     const next: DocumentPatch = {};
     if (patch.content !== undefined) next.content = patch.content;
@@ -102,7 +94,7 @@ export class DocumentsService {
       throw new DomainError('invalid_document', 'update requires at least one field');
     }
 
-    this.store.updateDocument(id, next, reembed);
+    this.store.updateDocument(id, next);
     return this.get(id);
   }
 
@@ -122,15 +114,14 @@ export class DocumentsService {
 
   async search(query: string, options: SearchOptions = {}): Promise<SearchHit[]> {
     const limit = Math.min(Math.max(options.limit ?? DEFAULT_SEARCH_LIMIT, 1), MAX_SEARCH_LIMIT);
-    const embedding = await this.embeddings.embed(query); // router failure -> surfaced error, no writes
-    const semantic = this.store.vectorSearch(embedding, VECTOR_CANDIDATES);
-    const fts = this.store.ftsSearch(query, VECTOR_CANDIDATES);
-    const candidates = fuse(semantic, fts, options.fusionWeight ?? this.defaults.fusionWeight, this.defaults.minScore);
-
     const hits: SearchHit[] = [];
-    for (const candidate of candidates) {
-      const document = this.store.getDocumentByRowid(candidate.rowid);
-      if (document) hits.push({ document, score: candidate.score, matchedBy: candidate.matchedBy });
+    // ftsSearch returns hits best-first (ORDER BY bm25 ascending: FTS5 assigns
+    // better matches smaller, more negative values); keep that order.
+    for (const hit of this.store.ftsSearch(query, FTS_CANDIDATES)) {
+      const score = ftsScore(hit.bm25);
+      if (score < this.defaults.minScore) continue;
+      const document = this.store.getDocumentByRowid(hit.rowid);
+      if (document) hits.push({ document, score });
       if (hits.length >= limit) break;
     }
     return hits;

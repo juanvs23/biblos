@@ -1,8 +1,8 @@
 /**
  * HTTP-level test harness: starts the real server (createServer from
- * src/index.ts) on an ephemeral loopback port with a temp SQLite DB and the
- * mocked embedding seam — no external network. Used by the auth matrix
- * (tests/auth.test.ts) and the tools HTTP integration (tests/tools.test.ts).
+ * src/index.ts) on an ephemeral loopback port with a temp SQLite DB — no
+ * external network. Used by the auth matrix (tests/auth.test.ts) and the
+ * tools HTTP integration (tests/tools.test.ts).
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,7 +11,6 @@ import { join } from 'node:path';
 import type { Config } from '../src/config.js';
 import { openStore, type Store } from '../src/db/store.js';
 import { createServer } from '../src/index.js';
-import { mockEmbeddings } from './helpers.js';
 
 export interface HttpHarness {
   baseUrl: string;
@@ -27,11 +26,6 @@ export function testConfig(dbPath: string, overrides: Partial<Config> = {}): Con
   return {
     apiKey: TEST_API_KEY,
     allowedOrigins: [TEST_ORIGIN],
-    routerUrl: 'http://127.0.0.1:8085',
-    embedModel: 'nomic-embed-text-v1.5.Q8_0',
-    embedTimeoutMs: 10_000,
-    embedConnectTimeoutMs: 3_000,
-    fusionWeight: 0.5,
     minScore: 0,
     dbPath,
     host: '127.0.0.1',
@@ -44,7 +38,7 @@ export async function startHttpServer(overrides: Partial<Config> = {}): Promise<
   const dir = mkdtempSync(join(tmpdir(), 'biblos-http-'));
   const dbPath = join(dir, 'test.db');
   const store = openStore(dbPath);
-  const { server } = await createServer(testConfig(dbPath, overrides), { store, embeddings: mockEmbeddings() });
+  const { server } = await createServer(testConfig(dbPath, overrides), { store });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address() as { port: number };
   return {

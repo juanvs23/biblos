@@ -19,9 +19,6 @@ function makeDoc(content: string): DocumentRecord {
   return { id: randomUUID(), content, author: 'alice', createdAt: now, updatedAt: now, tags: [], type: 'note' };
 }
 
-/** 768-dim zero vector fixture — graph tests never touch vectors. */
-const VEC = new Array(768).fill(0);
-
 describe('GraphService', () => {
   let dir: string;
   let store: Store;
@@ -42,7 +39,7 @@ describe('GraphService', () => {
   function seedDocs<const T extends readonly string[]>(...contents: T): { [K in keyof T]: DocumentRecord } {
     return contents.map((content) => {
       const doc = makeDoc(content);
-      store.insertDocument(doc, VEC);
+      store.insertDocument(doc);
       return doc;
     }) as { [K in keyof T]: DocumentRecord };
   }

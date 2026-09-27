@@ -1,7 +1,8 @@
 /**
  * Sync persistence facade over a single better-sqlite3 connection (design: src/db/store.ts).
- * Every multi-statement operation runs in a transaction with rollback on error;
- * SQLITE_BUSY/LOCKED and constraint errors surface (never swallowed).
+ * CRUD is single-statement: statement-level atomicity plus FK cascade keep
+ * write operations all-or-nothing; SQLITE_BUSY/LOCKED and constraint errors
+ * surface (never swallowed).
  */
 import Database from 'better-sqlite3';
 
@@ -17,11 +18,6 @@ export interface DocumentFilters {
 
 /** Update patch: metadata may clear `project` with an explicit null. */
 export type DocumentPatch = Partial<Omit<DocumentRecord, 'project'>> & { project?: string | null };
-
-export interface VectorHit {
-  rowid: number;
-  distance: number;
-}
 
 export interface FtsHit {
   rowid: number;
@@ -82,6 +78,17 @@ export function sanitizeFtsQuery(query: string): string {
     .join(' ');
 }
 
+/**
+ * Normalize an FTS5 bm25 rank into (0, 1]. Kept from the removed hybrid layer
+ * so BIBLOS_MIN_SCORE keeps its established score semantics. NOTE: FTS5 assigns
+ * better matches SMALLER (more negative) bm25 values, so the best hit gets the
+ * LOWEST normalized score — relevance ranking is ftsSearch's bm25-ascending
+ * order, not this score.
+ */
+export function ftsScore(bm25: number): number {
+  return 1 / (1 + Math.abs(bm25));
+}
+
 function mapDocument(row: DocumentRow): DocumentRecord {
   return {
     id: row.id,
@@ -125,34 +132,27 @@ export class Store {
 
   // --- documents ---
 
-  /** One transaction: documents row + embedding row. FTS row is synced by trigger. */
-  insertDocument(doc: DocumentRecord, embedding: number[]): void {
-    const tx = this.db.transaction(() => {
-      const info = this.db
-        .prepare(
-          `INSERT INTO documents (id, content, author, created_at, updated_at, tags, project, type)
-           VALUES (@id, @content, @author, @createdAt, @updatedAt, @tags, @project, @type)`,
-        )
-        .run({
-          id: doc.id,
-          content: doc.content,
-          author: doc.author,
-          createdAt: doc.createdAt,
-          updatedAt: doc.updatedAt,
-          tags: JSON.stringify(doc.tags),
-          project: doc.project ?? null,
-          type: doc.type,
-        });
-      // vec0 requires an INTEGER rowid; better-sqlite3 binds numbers as REAL.
-      this.db
-        .prepare('INSERT INTO document_embeddings (rowid, embedding) VALUES (?, ?)')
-        .run(BigInt(info.lastInsertRowid), new Float32Array(embedding));
-    });
-    tx();
+  /** Insert a document; the FTS row is synced by the documents_ai trigger. */
+  insertDocument(doc: DocumentRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO documents (id, content, author, created_at, updated_at, tags, project, type)
+         VALUES (@id, @content, @author, @createdAt, @updatedAt, @tags, @project, @type)`,
+      )
+      .run({
+        id: doc.id,
+        content: doc.content,
+        author: doc.author,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+        tags: JSON.stringify(doc.tags),
+        project: doc.project ?? null,
+        type: doc.type,
+      });
   }
 
-  /** Update content/metadata and refresh updated_at; optionally replace the embedding (content change). */
-  updateDocument(id: string, patch: DocumentPatch, reembed?: number[]): void {
+  /** Update content/metadata and refresh updated_at; the FTS index is synced by the documents_au trigger. */
+  updateDocument(id: string, patch: DocumentPatch): void {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id };
     if (patch.content !== undefined) {
@@ -176,30 +176,14 @@ export class Store {
       params.type = patch.type;
     }
     sets.push(`updated_at = ${NOW}`);
-    const tx = this.db.transaction(() => {
-      this.db.prepare(`UPDATE documents SET ${sets.join(', ')} WHERE id = @id`).run(params);
-      if (reembed !== undefined) {
-        const row = this.db.prepare('SELECT rowid FROM documents WHERE id = ?').get(id) as { rowid: number } | undefined;
-        if (row) {
-          this.db.prepare('DELETE FROM document_embeddings WHERE rowid = ?').run(BigInt(row.rowid));
-          this.db
-            .prepare('INSERT INTO document_embeddings (rowid, embedding) VALUES (?, ?)')
-            .run(BigInt(row.rowid), new Float32Array(reembed));
-        }
-      }
-    });
-    tx();
+    this.db.prepare(`UPDATE documents SET ${sets.join(', ')} WHERE id = @id`).run(params);
   }
 
-  /** One transaction: embedding row + documents row (FTS trigger + relations FK cascade). Returns true if the doc existed. */
+  /** Deletes the documents row; FTS row and relation edges are removed by trigger/FK cascade. Returns true if the doc existed. */
   deleteDocument(id: string): boolean {
-    const row = this.db.prepare('SELECT rowid FROM documents WHERE id = ?').get(id) as { rowid: number } | undefined;
-    if (!row) return false;
-    const tx = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM document_embeddings WHERE rowid = ?').run(BigInt(row.rowid));
-      this.db.prepare('DELETE FROM documents WHERE id = ?').run(id);
-    });
-    tx();
+    const exists = this.db.prepare('SELECT 1 FROM documents WHERE id = ?').get(id);
+    if (!exists) return false;
+    this.db.prepare('DELETE FROM documents WHERE id = ?').run(id);
     return true;
   }
 
@@ -208,7 +192,7 @@ export class Store {
     return row ? mapDocument(row) : null;
   }
 
-  /** Lookup used by hybrid search, where FTS/vec candidates arrive as rowids. */
+  /** Lookup used by search, where FTS candidates arrive as rowids. */
   getDocumentByRowid(rowid: number): DocumentRecord | null {
     const row = this.db.prepare('SELECT * FROM documents WHERE rowid = ?').get(rowid) as DocumentRow | undefined;
     return row ? mapDocument(row) : null;
@@ -229,13 +213,7 @@ export class Store {
     return (this.db.prepare(sql).all(...params, f.limit, f.offset) as DocumentRow[]).map(mapDocument);
   }
 
-  // --- vector + FTS search ---
-
-  vectorSearch(embedding: number[], k: number): VectorHit[] {
-    return this.db
-      .prepare('SELECT rowid, distance FROM document_embeddings WHERE embedding MATCH ? ORDER BY distance LIMIT ?')
-      .all(new Float32Array(embedding), k) as VectorHit[];
-  }
+  // --- FTS search ---
 
   ftsSearch(query: string, k: number): FtsHit[] {
     const q = sanitizeFtsQuery(query);
